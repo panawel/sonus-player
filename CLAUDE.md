@@ -10,10 +10,11 @@ Sonus — an Electron + Vite + React desktop MP3/audio player with a dark glassm
 
 - `npm run dev` — starts Vite (`localhost:5173`) and launches Electron concurrently (via `concurrently` + `wait-on`). This is the normal development loop; the Electron window loads the Vite dev server, not `dist/`.
   - **Kill any previous dev server first** (`pkill -f "mp3Player/node_modules"` — scope the pattern to this project, a bare `pkill -f Electron` also kills VS Code and any other Electron app). If Vite prints `Port 5173 is in use, trying another one…` it binds **5174**, while Electron still loads **5173** — so `wait-on` succeeds, the window opens against the *old* server, and you silently test stale code with no error anywhere.
-- `npm run build` — `vite build` (frontend → `dist/`) then `electron-builder`, producing a **universal** (Intel + Apple Silicon) `.dmg` and `.zip` in `release/`. ~224MB per artifact, 494MB installed: both architecture slices of the Electron framework ship in one bundle. ~40s, but the *first* universal build downloads the x64 Electron dist (~100MB) and needs network. See `BUILD_INSTRUCTIONS.md` for the full packaging walkthrough (verification, cross-arch testing, file associations, moving to `/Applications`).
+- `npm run build` — `vite build` (frontend → `dist/`) then `electron-builder`, producing a **universal** (Intel + Apple Silicon) `.dmg` and `.zip` in `release/`. ~224MB per artifact, ~498MB installed: both architecture slices of the Electron framework ship in one bundle. ~40s, but the *first* universal build downloads the x64 Electron dist (~100MB) and needs network. See `BUILD_INSTRUCTIONS.md` for the full packaging walkthrough (verification, cross-arch testing, file associations, moving to `/Applications`).
 - `scripts/verify-bundle.sh [app] [--expect-universal|--expect-arch <arch>]` — structural checks on a packaged `.app` (defaults to `release/mac-universal/Sonus.app`). Exits 0/1. Asserts every Mach-O binary carries both slices, `LSMinimumSystemVersion`, all six file associations, both Finder Service bundles, a single merged `app.asar`, and that the smoke fixture is present. **A partial `lipo` merge is the failure this exists for** — the app launches fine on the machine that built it and then dies on Intel in whichever helper process was missed.
-- `npm run lint` — ESLint over the whole repo (flat config in `eslint.config.js`).
-- `npm run test` — `vitest run`, all tests once.
+- `npm run lint` — ESLint over the whole repo (flat config in `eslint.config.js`). **The clean baseline is `6 problems (0 errors, 6 warnings)`** — four `exhaustive-deps` in `App.jsx`/`HomeDetailView.jsx` whose dep arrays are deliberately incomplete (each marked "intentionally omits" in a comment right above it), plus TanStack Virtual's incompatible-library notice in `TrackList.jsx`. Don't try to "fix" those six; a **seventh** warning is the signal.
+- `npm run test` — `vitest run`, all tests once. Tests sit beside their sources: `src/*.test.{js,jsx}` run under jsdom + React Testing Library, `electron/*.test.mjs` are pure Node against temp dirs — which is *why* `artwork.mjs`, `indexStore.mjs`, `launchFiles.mjs` and `finderServices.mjs` are Electron-free modules.
+  - **Coverage is deliberately lopsided, and a green run means less than it looks.** The pure modules, the sort/selection hooks and `TrackRow` are covered well. The three biggest renderer files are not covered at all: `HomeView.jsx` (1510 lines), `TagEditorWindow.jsx` (577) and `TrackList.jsx` have **no unit tests**, and `App.test.jsx` only asserts that 1912 lines of `App.jsx` mount without throwing. Everything meaningful about those is exercised **only** by the smoke suite below. `npm run test` passing says nothing about the UI.
 - Single test file: `npx vitest run src/TrackRow.test.jsx`
 - Automated end-to-end smoke test: `npx vite build && npx electron . --smoke` — boots the **built** app against an isolated temp `userData` and asserts against real Electron + real Chromium. Covers: parse→thumbnail→protocol; tag-write round-trips (MP3/WAV/FLAC); the reindex pipeline; file-open/Services launch arbitration; re-opening the already-loaded file; and, driven through `executeJavaScript`, the tracklist UI (sort-cycle clicks, keyboard, a 20k-track bench), the column header's geometry/alignment/isolation-from-scroll, the Tag Editor window (centred on its display, the Search Online popup, dedupe-then-limit), and a guard that `.glass-panel` has a real computed `blur()` in the **built** CSS.
   - Several of those are only observable in a built app — the blur one in particular is invisible under `npm run dev`. Running the unit tests alone will not catch them.
@@ -27,8 +28,28 @@ Sonus — an Electron + Vite + React desktop MP3/audio player with a dark glassm
 - Cold-launch smoke variant: `npx electron . --smoke --open-file=/tmp/a.mp3 --open-file=/tmp/b.mp3` — seeds the same batch a real Finder double-click would, then runs a dedicated launch-ordering assertion set and exits. macOS only delivers `open-file` to a registered app, so this path is otherwise invisible to `npm run dev`.
 - Single test by name: `npx vitest run -t "formats m:ss"` (the name must match a real `it(...)` — a typo silently skips every test and reports success)
 - `npm run preview` — Vite's static preview of the built frontend (rarely needed; doesn't run Electron).
+- `node scripts/make-test-fixture.mjs` — regenerates `test-fixture.mp3` (see "Working in this repo").
+- `python3 scripts/prepare-screenshots.py` — turns raw captures in `screenshoots/` (gitignored) into the README assets in `docs/assets/`. Two non-obvious jobs beyond resizing: it repaints the Tag Editor's File field, which showed a real absolute path containing the developer's macOS username; and it flattens RGBA onto opaque black, because GitHub renders README images over a light *or* dark page depending on the viewer's theme and any transparency would show through inconsistently. Captures must come from native `screencapture` — see "Working in this repo" for why headless screenshots of this app are useless.
 
 There is no `typecheck` script — this is a plain JS/JSX project (no TypeScript).
+
+## Cutting a release
+
+`BUILD_INSTRUCTIONS.md` covers *building*; this is *publishing*. The repo is public at **https://github.com/panawel/sonus-player** and releases carry the `.dmg` + `.zip` as GitHub Release assets — they cannot live in the tree, since GitHub hard-rejects files over 100MB and each artifact is ~224MB.
+
+1. **`git status` must be clean before building.** The artifacts have to provably correspond to the tag, not to a slightly-earlier local build.
+2. `npm run build` → `./scripts/verify-bundle.sh` → smoke **both** slices (`arch -arm64` and `arch -x86_64`).
+3. `shasum -a 256` both artifacts. The hashes go into the release notes verbatim: for an unsigned app that is the *only* integrity signal on offer, so a wrong one is worse than publishing none.
+4. Tag, push, create the Release, upload both assets.
+5. **Verify by downloading the published asset and re-hashing it** — not by re-hashing the local file, which proves nothing about what GitHub actually stored.
+
+Repeat the Gatekeeper instructions *inline* in the release notes. People arrive at the Releases page directly from a link and never see the README, and an unsigned app that appears broken on first launch is the single biggest drop-off point.
+
+**Environment gotchas on this machine** (both cost real time to rediscover):
+- **`gh` is not installed and there is no Homebrew.** Releases go through the GitHub REST API with the token already in the macOS keychain — `printf 'protocol=https\nhost=github.com\n\n' | git credential fill` yields a token with `repo, workflow, read:user, user:email` scopes. Never echo it.
+- **The system `python3` has no CA bundle**: `urllib` dies with `CERTIFICATE_VERIFY_FAILED` on any HTTPS call. Use `curl` for the API and `python3` only for assembling/parsing JSON locally.
+- **Annotated tags don't resolve to commits.** `git rev-parse v1.0.0` returns the tag *object*; comparing it to `HEAD` reports a phantom mismatch. Use `git rev-parse 'v1.0.0^{}'`.
+- **Git identity here is repo-local `panawel`**, deliberately different from the global `Idan Pnuel`. Don't "correct" it — the global config would write a real name into public commit history, permanently.
 
 ## Architecture
 
@@ -112,6 +133,16 @@ Note that nothing else about the app is OS-version-sensitive: Chromium and Node 
 - The universal build is **unsigned and un-notarized** (no Apple Developer account). On Ventura the right-click → Open bypass still works, so it costs one extra click the first time on a given Mac. Note this bypass was removed in macOS 15 Sequoia, so a modern Mac needs System Settings → Privacy & Security → "Open Anyway" instead. `codesign --verify` fails strictly on the ad-hoc signature (`code has no resources but signature indicates they must be present`) — that is normal for electron-builder's unsigned output and matches the known-good baseline, which is why `verify-bundle.sh` reports it as info rather than asserting it.
 - The `react-hooks/refs`, `react-hooks/set-state-in-effect`, and `react-hooks/immutability` ESLint rules are disabled in `eslint.config.js` — they're React-Compiler diagnostics, this project has no React Compiler, and the codebase's documented render-time mirror-ref idiom (`viewRef.current = view` etc.) is deliberate. Don't "fix" the idiom to re-enable them.
 - The packaged app's Dock/Finder icon (`build/icon.icns`, embedded via `build.mac.icon`) shows inside an extra light gray/white rounded-square card that isn't part of the source artwork — confirmed via side-by-side screenshot against the dev-mode icon (set via `app.dock.setIcon()` in `electron/main.js`, which renders the raw artwork with no card). Root cause: macOS (Big Sur+) auto-wraps any app icon shipped as a plain `.icns` rather than a compiled Xcode Asset Catalog (`actool`/`Assets.car`) — confirmed not a padding/content issue, since the source icon's artwork already matches Apple's safe-zone spec almost exactly. The real fix needs full Xcode (only Command Line Tools are installed) plus a custom electron-builder build step to compile and inject an Asset Catalog — nontrivial and not guaranteed. User explicitly chose to accept this as-is (2026-06-18) since it's standard, near-universal cosmetic behavior for Electron/non-Xcode-Catalog apps on macOS. Don't attempt to "fix" this opportunistically.
+
+### Genuinely dead code (unlike everything above, this *is* safe to delete)
+
+Almost all of this file argues that something which looks removable is load-bearing. The inverse is worth writing down too, so the next reader doesn't have to re-derive it by grep. All of the following are verified unreferenced:
+
+- **CSS in `index.css`** — `.track-header-sort-chip` (left over from the deleted Sort dropdown), `.track-list-header-title` and `.track-list-header-meta` (the deleted Library identity line, whose *absence* the smoke suite asserts), `.np-text-block`, and `--np-slider-color` (read via `var()` but never set anywhere, so it always renders its hardcoded fallback gradient).
+- **`src/MarqueeText.jsx`** — committed but imported by nothing. The player panel uses the inline `.marquee-scroll` class instead, so the shared `@keyframes marquee-scroll` can be changed without touching this file.
+- A **stale comment block** immediately above `.track-list-header` still describes the deleted sticky/`--scrolled` header design; the correct comment follows right after it.
+
+Deleting these is safe but optional — they cost nothing at runtime, since unused CSS rules and an unimported module are dropped or never loaded by the bundler.
 
 ## Deep-dive reference
 
