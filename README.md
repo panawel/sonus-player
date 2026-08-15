@@ -141,7 +141,7 @@ That's the whole list. The UI font is bundled in the app rather than fetched fro
 | --- | --- |
 | **macOS** | 12.0 Monterey or newer |
 | **Mac** | Any Intel or Apple Silicon Mac — single universal binary |
-| **Disk** | ~480MB installed |
+| **Disk** | ~500MB installed (a universal build carries both architectures) |
 
 ## Building from source
 
