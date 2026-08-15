@@ -1,0 +1,879 @@
+/* Inter is bundled, never fetched. It used to be pulled from
+   fonts.googleapis.com at runtime, which meant every launch sent the user's IP
+   to Google for a font, and an offline Mac silently fell back to -apple-system
+   — a real concern for the older machines this app targets.
+
+   These are the aggregate per-weight files, so all seven subsets (latin,
+   latin-ext, cyrillic, cyrillic-ext, greek, greek-ext, vietnamese) ship with
+   their unicode-range rules intact. That deliberately matches what the Google
+   endpoint was serving: bundling latin alone would silently drop Cyrillic and
+   Greek track titles back to the system font. 472KB total, against a 481MB app.
+
+   Vite inlines these at build time and emits the woff2 files as hashed assets,
+   so the built CSS contains @font-face rules and no network reference. */
+@import '@fontsource/inter/300.css';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-panel: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-highlight: rgba(255, 255, 255, 0.15);
+  --glass-active: rgba(255, 255, 255, 0.25);
+  --text-primary: rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.55);
+  --accent-color: #0A84FF;
+  --accent-hover: #3b9cff;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text-primary);
+  /* The electron window has backgroundColor: transparent, so we can see desktop if we want,
+     but usually we want a dark tinted glass effect */
+  background: transparent;
+  overflow: hidden;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* Buttons, inputs and scrollable areas need no-drag to be interactive */
+button, input, textarea, a, .clickable, .scrollable {
+  -webkit-app-region: no-drag;
+}
+
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  /* Since we use titleBarStyle: 'hiddenInset', macOS traffic lights are overlaid on top.
+     Taller than the traffic lights strictly need, so the Library search box (fixed-position,
+     App.jsx) has room to breathe above and below it without overlapping the panel below. */
+  padding-top: 42px;
+}
+
+/* NEVER hand-write -webkit-backdrop-filter in this file.
+   Electron 41's Chromium has removed that property (CSS.supports reports false
+   for it), and Vite's CSS minifier collapses a backdrop-filter/-webkit- pair
+   down to the -webkit- one alone — so writing both silently produces a build
+   with NO blur at all, while `npm run dev` still looks right because it serves
+   unminified CSS. Write only the unprefixed property; Vite emits both spellings
+   itself, keeping the one that actually works. The smoke suite asserts
+   .glass-panel has a real computed blur, which is what caught this. */
+
+/* Reusable Glass Panel Class */
+.glass-panel {
+  background: var(--glass-panel);
+  backdrop-filter: blur(30px);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+}
+
+.glass-button {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* Without this, clicking a button (no ring - mouse focus doesn't trigger :focus-visible)
+     then pressing any key elsewhere (e.g. the arrow-key seek shortcut) makes Chromium
+     retroactively show a focus ring on whatever was last clicked. */
+  outline: none;
+}
+
+.glass-button:hover {
+  background: var(--glass-highlight);
+}
+.glass-button:active {
+  background: var(--glass-active);
+  transform: scale(0.97);
+}
+
+/* Generic spinner — used by the Tag Editor's Search Online popup. */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes volume-slider-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.volume-slider {
+  width: 80px;
+  height: 18px;
+}
+
+/* Vertical volume popup: pops up flush above the mute button (zero gap —
+   see App.jsx's volume hover group comment for why the gap must be zero).
+   .volume-popup-track is a small glass pill behind the rotated track,
+   matching the app's other glassmorphic surfaces rather than a bare slider
+   floating over whatever content happens to be underneath.
+   z-index: 7 is load-bearing — the seek bar's wrapper (App.jsx) has an
+   explicit zIndex: 6 and a negative marginTop that extends its own hover
+   zone upward into the content area above the panel; that strip overlaps
+   this popup's upper portion. Without a higher z-index here, the seek bar
+   wins the local stacking comparison (both are z-indexed siblings within
+   the same player-panel stacking context) and silently eats hover/pointer
+   events in that overlap band, breaking the popup exactly like the gap bug
+   this design otherwise avoids — confirmed live via CDP hit-testing. */
+.volume-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  padding-bottom: 10px;
+  animation: volume-slider-in 0.15s ease-out;
+}
+.volume-popup-track {
+  width: 18px;
+  height: 90px;
+  border-radius: 10px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* CSS transform is render-only and doesn't resize the input's own layout
+   box, so width/height here stay in the *unrotated* frame (width becomes
+   the visual height post-rotation) — Chromium correctly inverse-transforms
+   pointer coordinates for dragging, so this is a reliable, well-established
+   technique for vertical range inputs, not just a visual trick. */
+input[type="range"].volume-slider--vertical {
+  width: 74px;
+  height: 18px;
+  transform: rotate(-90deg);
+}
+
+input[type="range"].volume-slider::-webkit-slider-thumb {
+  opacity: 1;
+  transform: scale(1);
+}
+
+input[type="range"].volume-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+/* Bare glyph, no circle/fill — see App.jsx controlAccent for the tint color. */
+.play-pause-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  outline: none;
+  transition: transform 0.2s ease, filter 0.15s ease;
+}
+.play-pause-btn:hover {
+  transform: scale(1.06);
+}
+.play-pause-btn:active {
+  transform: scale(0.92);
+}
+/* drop-shadow, not box-shadow — this is a bare SVG icon, no filled shape for
+   a box-shadow to hug. Always plain white, matching the icon's own color. */
+@keyframes icon-glow-pulse {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(255,255,255,0.4)); }
+  50%       { filter: drop-shadow(0 0 12px rgba(255,255,255,0.55)); }
+}
+.play-pause-btn--playing {
+  animation: icon-glow-pulse 2s ease-in-out infinite;
+}
+
+.player-meta-link {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.player-meta-link:hover {
+  color: var(--text-primary);
+}
+
+.skip-btn {
+  transition: transform 0.15s ease;
+}
+.skip-btn:hover  { transform: scale(1.12); }
+.skip-btn:active { transform: scale(0.9);  }
+
+.player-artwork {
+  position: relative;
+}
+.player-artwork::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.12);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+  border-radius: 8px;
+}
+.player-artwork:hover::after {
+  opacity: 1;
+}
+
+.tag-artwork {
+  transition: box-shadow 0.15s ease;
+}
+.tag-artwork--selected {
+  box-shadow: 0 0 0 2px var(--accent-color), 0 0 12px rgba(0, 242, 254, 0.35);
+}
+
+.glass-button.icon-only {
+  padding: 8px;
+  border-radius: 50%;
+}
+
+/* Sidebar collapse toggle: a thin tab sitting right at the sidebar/content
+   boundary. Positioned absolutely against .app-container; only `left`
+   (the collapsed/expanded endpoint) is set inline, in App.jsx. */
+.sidebar-toggle-tab {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: left 0.25s ease, background 0.15s ease;
+  z-index: 20;
+  width: 16px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+.sidebar-toggle-tab:hover {
+  background: var(--glass-highlight);
+  color: var(--text-primary);
+}
+.sidebar-toggle-tab:active {
+  background: var(--glass-active);
+  transform: translateY(-50%) scale(0.92);
+}
+
+/* Confirm modal (Play / Play Next / Add to Queue / Cancel): floats over the
+   tracklist with no opaque vibrancy material backing it, unlike .glass-panel's
+   other usages - needs its own more opaque, higher-contrast surface. */
+@keyframes confirm-modal-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes confirm-modal-panel-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.confirm-modal-backdrop {
+  animation: confirm-modal-backdrop-in 0.18s ease-out;
+}
+
+.confirm-modal-panel {
+  background: rgba(28, 28, 32, 0.92);
+  backdrop-filter: blur(40px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  animation: confirm-modal-panel-in 0.18s ease-out;
+}
+
+.confirm-modal-button {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.player-control-button {
+  background: transparent;
+  border: none;
+  padding: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* See .glass-button's outline comment - same retroactive focus-ring quirk applies here. */
+  outline: none;
+}
+.player-control-button:hover {
+  background: var(--glass-highlight);
+}
+.player-control-button:active {
+  background: var(--glass-active);
+  transform: scale(0.92);
+}
+/* Track Row Styles */
+.track-row {
+  transition: background 0.2s ease;
+}
+.track-row:hover {
+  background: var(--glass-highlight);
+}
+.track-row.active {
+  background: var(--glass-active);
+  box-shadow: inset 2px 0 0 var(--accent-color);
+}
+.track-row.selected {
+  background: var(--glass-highlight);
+  box-shadow: inset 0 0 0 1px var(--accent-color);
+}
+.track-row.active.selected {
+  background: var(--glass-active);
+  box-shadow: inset 2px 0 0 var(--accent-color), inset 0 0 0 1px var(--accent-color);
+}
+
+/* Scrollbar customization */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--glass-highlight);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--glass-active);
+}
+
+/* Custom Range Slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  background: transparent;
+  width: 100%;
+  height: 24px; /* Massive invisible clickable padding */
+  cursor: pointer;
+  margin: 0;
+}
+input[type="range"]:focus {
+  outline: none;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 4px;
+  cursor: pointer;
+  background: rgba(255,255,255,0.2);
+  border-radius: 2px;
+  transition: background 0.2s;
+}
+
+input[type="range"].wow-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--np-slider-color, #00f2fe) 0%,
+    var(--np-slider-color, #4facfe) var(--progress, 0%),
+    rgba(255,255,255,0.2) var(--progress, 0%)
+  );
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 12px;
+  width: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  margin-top: -4px;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+input[type="range"].wow-slider:hover::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--np-slider-color, #00f2fe) 0%,
+    var(--np-slider-color, #4facfe) var(--progress, 0%),
+    rgba(255,255,255,0.3) var(--progress, 0%)
+  );
+}
+
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:active::-webkit-slider-thumb {
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+/* Library search (title-bar strip): idle state keeps the same plain neutral border as every
+   other glass input in the app, plus a soft elevation shadow so it doesn't read as a stray
+   box floating disconnected from anything. Focus intensifies into a full glow ring using the
+   app's signature wow-slider gradient (#00f2fe -> #4facfe). */
+.wow-search-input {
+  border-color: var(--glass-border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+.wow-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.65);
+}
+.wow-search-input:focus {
+  border-color: #4facfe;
+  box-shadow: 0 0 0 1.5px #00f2fe, 0 0 18px 3px rgba(79, 172, 254, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+/* Play/Pause long-press (0.7s) ring: only mounts after a 250ms delay (App.jsx), so this
+   fills for the remaining 450ms - completing exactly when the 700ms jump timer fires. */
+@keyframes hold-ring-fill {
+  to { stroke-dashoffset: 0; }
+}
+.hold-ring-circle {
+  animation: hold-ring-fill 0.45s linear forwards;
+}
+
+
+/* Top-of-player-panel full-width seek bar */
+input[type="range"].top-progress-bar {
+  height: 2px;
+  display: block;
+  transition: height 0.15s ease;
+}
+
+input[type="range"].top-progress-bar::-webkit-slider-runnable-track {
+  height: 2px;
+  transition: height 0.15s ease, background 0.2s ease;
+}
+
+/* Override wow-slider's inherited 4px track height for the top bar */
+input[type="range"].top-progress-bar.wow-slider::-webkit-slider-runnable-track {
+  height: 2px;
+}
+
+/* Hovered state — driven by React isSeekHovered so the full 16px wrapper
+   triggers the effect, not just the tiny 2px input element */
+input[type="range"].top-progress-bar--hovered {
+  height: 4px;
+}
+
+input[type="range"].top-progress-bar--hovered::-webkit-slider-runnable-track,
+input[type="range"].top-progress-bar--hovered.wow-slider::-webkit-slider-runnable-track {
+  height: 4px;
+}
+
+/* Thumb hidden at rest, appears on hover via top-progress-bar--hovered */
+input[type="range"].top-progress-bar::-webkit-slider-thumb {
+  opacity: 1;
+  transform: scale(1);
+  height: 10px;
+  width: 10px;
+  margin-top: -4px;
+}
+
+input[type="range"].top-progress-bar--hovered::-webkit-slider-thumb {
+  transform: scale(1.3);
+}
+
+/* Now Playing: scrolls text that doesn't fit its box, back and forth, pausing at each end.
+   Both ends of the cycle land on translateX(0), so looping is seamless — no snap-back jump. */
+@keyframes marquee-scroll {
+  0%, 8%    { transform: translateX(0); }
+  46%, 54%  { transform: translateX(calc(-1 * var(--marquee-distance))); }
+  92%, 100% { transform: translateX(0); }
+}
+.marquee-scroll {
+  animation-name: marquee-scroll;
+  animation-duration: var(--marquee-duration, 8s);
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* Now Playing artwork: fades and scales in when a new track loads */
+@keyframes np-artwork-appear {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Now Playing artwork: subtle breathing pulse while playing */
+@keyframes np-artwork-breathe {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.018); }
+}
+
+/* Now Playing text block: staggered fade-up after artwork */
+@keyframes np-text-appear {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.np-artwork {
+  animation:
+    np-artwork-appear 0.35s ease-out forwards,
+    np-artwork-breathe 12s ease-in-out 0.35s infinite;
+  animation-play-state: running, running;
+}
+
+/* Pause only the breathe animation; keep the appear running so it completes on track change */
+.np-artwork.np-artwork-paused {
+  animation-play-state: running, paused;
+}
+
+.np-text-block {
+  animation: np-text-appear 0.35s ease-out 0.1s both;
+}
+
+/* Custom dropdown menu (track list 3-dots + Now Playing ⋮) */
+.track-dropdown {
+  background: rgba(28, 28, 32, 0.92);
+  backdrop-filter: blur(40px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 180px;
+  user-select: none;
+}
+.track-dropdown-item {
+  padding: 7px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background 0.12s ease;
+  white-space: nowrap;
+}
+.track-dropdown-item:hover {
+  background: var(--glass-highlight);
+}
+.track-dropdown-item:active {
+  background: var(--glass-active);
+}
+.track-dropdown-item.disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+.track-dropdown-item.danger {
+  color: #ff6b6b;
+}
+.track-dropdown-separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 0;
+}
+
+/* Track list: 3-dots menu button that appears on row hover */
+.track-menu-btn {
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.track-menu-btn:hover {
+  background: var(--glass-highlight) !important;
+}
+.track-menu-btn:active {
+  background: var(--glass-active) !important;
+  transform: scale(0.88);
+}
+
+/* Now Playing ambient color wash — circles inside blur furnace */
+@keyframes np-flare-1 {
+  0%   { transform: translate(0,    0)    scale(1);    }
+  25%  { transform: translate(40%,  10%)  scale(1.3);  }
+  50%  { transform: translate(55%,  25%)  scale(0.75); }
+  75%  { transform: translate(20%,  40%)  scale(1.2);  }
+  100% { transform: translate(0,    0)    scale(1);    }
+}
+@keyframes np-flare-2 {
+  0%   { transform: translate(0,    0)    scale(1);    }
+  25%  { transform: translate(-30%, -10%) scale(0.7);  }
+  50%  { transform: translate(-50%, -30%) scale(1.35); }
+  75%  { transform: translate(-20%, -45%) scale(0.85); }
+  100% { transform: translate(0,    0)    scale(1);    }
+}
+@keyframes np-flare-3 {
+  0%   { transform: translate(0,    0)    scale(1);    }
+  25%  { transform: translate(-45%, 15%)  scale(1.25); }
+  55%  { transform: translate(-20%, 35%)  scale(0.7);  }
+  80%  { transform: translate(-50%, 20%)  scale(1.1);  }
+  100% { transform: translate(0,    0)    scale(1);    }
+}
+
+/* Now Playing: › open chevron (right edge of left column) */
+.lyrics-open-btn {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 8px;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  outline: none;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease, background 0.2s ease;
+  animation: lyrics-btn-glow 3s ease-in-out infinite;
+}
+.lyrics-open-btn:hover {
+  color: rgba(255, 255, 255, 1);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Close state: glow stops — hint done, now it's a control */
+.lyrics-open-btn--open {
+  animation: none;
+  color: rgba(255, 255, 255, 0.85);
+}
+.lyrics-open-btn--open:hover {
+  color: rgba(255, 255, 255, 1);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+@keyframes lyrics-btn-glow {
+  0%, 100% { filter: drop-shadow(0 0 0px rgba(0, 242, 254, 0)); }
+  50%       { filter: drop-shadow(0 0 6px rgba(0, 242, 254, 0.55)); }
+}
+
+/* ─── Home screen ─────────────────────────────────────────────────── */
+
+/* Genre filter chip row — hides scrollbar, chips never wrap */
+.home-genre-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.home-genre-chips::-webkit-scrollbar { display: none; }
+
+.home-genre-chip {
+  flex-shrink: 0;
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.home-genre-chip:hover {
+  background: var(--glass-highlight);
+}
+.home-genre-chip.active {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
+}
+
+/* Outer: scroll container — clipping boundary is kept away from cards via padding */
+.home-card-row-outer {
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  padding: 20px 12px 48px;
+}
+.home-card-row-outer::-webkit-scrollbar { display: none; }
+
+/* Inner: flex row — no overflow so scale transforms aren't clipped */
+.home-card-row {
+  display: flex;
+  gap: 16px;
+}
+
+@keyframes eq-bounce {
+  0%, 100% { height: 3px; }
+  50%       { height: 10px; }
+}
+.eq-bar {
+  width: 2px;
+  background: var(--accent-color);
+  border-radius: 1px;
+  align-self: flex-end;
+  animation: eq-bounce 0.7s ease-in-out infinite;
+}
+.eq-bar:nth-child(2) { animation-delay: 0.15s; }
+.eq-bar:nth-child(3) { animation-delay: 0.30s; }
+
+/* ─── Unified tracklist (Library + Details) ───────────────────────── */
+
+/* Sticky command bar pinned to the top of the scrollport.
+   Reads as a *raised* glass surface rather than a dark slab: the light
+   gradient + inset top highlight simulate a bevel catching light, and the
+   vibrancy behind supplies the depth.
+
+   The two states exist for a functional reason, not decoration. At rest
+   nothing is underneath the bar, so it can be airy and translucent. Once rows
+   scroll beneath it, a translucent bar would let them bleed through and wreck
+   the column labels' legibility — so --scrolled drops an opaque underlay in
+   behind the same gradient and lifts the bar with a shadow.
+
+   Only background-color and box-shadow animate. The bar's HEIGHT must never
+   change: TrackList measures scrollMargin (scroll-content top → first row) in
+   a layout effect that does not re-run on scroll, so an animated height would
+   silently desync windowing and scrollToIndex. */
+/* Lives ABOVE the scroll container, not inside it (see TrackListHeader.jsx).
+   Because no row can ever pass behind it, it needs no background, no blur and
+   no scrolled state — it is text over a rule and looks identical at every
+   scroll position. The previous sticky version had to paint an opaque fill on
+   scroll to stay legible, which is what made it visibly darken. */
+.track-list-header {
+  position: relative;
+  flex-shrink: 0;
+  height: 26px;
+  /* Padding is 12px (matching .track-row's own) so the labels land exactly over
+     the columns they sort. The smoke suite asserts this to the pixel. */
+  padding: 0 12px;
+}
+
+/* The rule — the only thing separating the labels from the rows. */
+.track-list-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16) 8%, rgba(255, 255, 255, 0.16) 92%, transparent);
+  pointer-events: none;
+}
+
+/* Density toggle — its only entry point since the Sort dropdown was removed. */
+.track-header-density {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  outline: none;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.track-header-density:hover {
+  opacity: 1;
+  background: var(--glass-highlight);
+}
+
+.track-list-header-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-primary);
+  opacity: 0.9;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.track-list-header-meta {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-header-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  transition: color 0.15s ease;
+  min-width: 0;
+}
+.track-header-label:hover { color: var(--text-primary); }
+.track-header-label.active { color: var(--accent-color); }
+
+.track-header-sort-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.track-header-sort-chip:hover { background: var(--glass-highlight); color: var(--text-primary); }
+.track-header-sort-chip.active { color: var(--accent-color); border-color: rgba(10, 132, 255, 0.45); }
+
+/* Soft fade when the sort order changes (rows block is re-keyed) */
+@keyframes track-rows-appear {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.track-rows-appear {
+  animation: track-rows-appear 0.2s ease-out;
+}
+
+/* Quick Picks: 4-column grid, drops to 2 at narrow windows */
+.home-quick-picks-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  .home-quick-picks-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

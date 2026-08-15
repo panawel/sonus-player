@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Packaged app output — .dmg/.zip are ~224MB each and belong on the GitHub
+# Releases page, not in the tree. GitHub rejects files over 100MB outright.
+release
+
+# Machine-local Claude Code permissions; contains absolute paths from the
+# developer's own machine. Note *.local above does NOT match this filename.
+.claude/settings.local.json
+
+# Raw full-resolution captures (~27MB). The published, resized and redacted
+# versions live in docs/assets/ and are produced by scripts/prepare-screenshots.py.
+screenshoots/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

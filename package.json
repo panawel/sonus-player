@@ -1,0 +1,105 @@
+{
+  "name": "sonus",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A beautiful, native-feeling music player for macOS — glassmorphic UI, real tag editing, and smooth at 20,000 tracks.",
+  "author": "panawel <panawel@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/panawel/sonus-player",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/panawel/sonus-player.git"
+  },
+  "bugs": {
+    "url": "https://github.com/panawel/sonus-player/issues"
+  },
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build && electron-builder",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@tanstack/react-virtual": "^3.14.3",
+    "electron-window-state": "^5.0.3",
+    "fast-average-color": "^9.5.2",
+    "music-metadata": "^11.13.0",
+    "node-id3": "^0.2.9",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@fontsource/inter": "^5.3.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "classnames": "^2.5.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "41.7.1",
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "lucide-react": "^1.18.0",
+    "vite": "^8.0.12",
+    "vitest": "^4.1.9",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.sonus.audio",
+    "productName": "Sonus",
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "electron/resources/services",
+        "to": "services"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.music",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "fileAssociations": [
+        {
+          "ext": [
+            "mp3",
+            "flac",
+            "wav",
+            "ogg",
+            "aac",
+            "m4a"
+          ],
+          "name": "Audio File",
+          "role": "Viewer"
+        }
+      ]
+    }
+  }
+}
