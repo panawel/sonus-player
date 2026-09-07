@@ -1,7 +1,7 @@
 {
   "name": "sonus",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A beautiful, native-feeling music player for macOS — glassmorphic UI, real tag editing, and smooth at 20,000 tracks.",
   "author": "panawel <panawel@gmail.com>",
   "license": "MIT",
