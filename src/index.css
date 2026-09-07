@@ -286,6 +286,43 @@ input[type="range"].volume-slider:hover::-webkit-slider-thumb {
   transform: translateY(-50%) scale(0.92);
 }
 
+/* Narrow-mode sidebar drawer (App.jsx's isNarrowLayout): the sidebar becomes a
+   fixed overlay instead of pushing content, sliding in over it rather than
+   beside it. Width/padding/transition stay inline (unchanged from the
+   persistent-column mode) so the open/close animation is identical either
+   way — this only adds positioning, background and elevation. */
+.sidebar-drawer {
+  position: fixed;
+  top: 42px;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  background: rgba(20, 20, 24, 0.92);
+  backdrop-filter: blur(24px);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.45);
+}
+
+/* Narrow drawer nav rows (App.jsx) — active-state background is set inline
+   (so it can compare against `view`); hover needs !important to win over
+   that inline background, same pattern as .track-menu-btn below. */
+.narrow-drawer-item {
+  transition: background 0.15s ease;
+}
+.narrow-drawer-item:hover {
+  background: var(--glass-highlight) !important;
+}
+
+.sidebar-drawer-backdrop {
+  position: fixed;
+  top: 42px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 29;
+  animation: confirm-modal-backdrop-in 0.18s ease-out;
+}
+
 /* Confirm modal (Play / Play Next / Add to Queue / Cancel): floats over the
    tracklist with no opaque vibrancy material backing it, unlike .glass-panel's
    other usages - needs its own more opaque, higher-contrast surface. */
@@ -875,5 +912,10 @@ input[type="range"].top-progress-bar--hovered::-webkit-slider-thumb {
 @media (max-width: 900px) {
   .home-quick-picks-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 460px) {
+  .home-quick-picks-grid {
+    grid-template-columns: 1fr;
   }
 }

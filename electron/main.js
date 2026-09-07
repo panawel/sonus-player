@@ -266,7 +266,7 @@ function createWindow() {
     y: mainWindowState.y,
     width: mainWindowState.width,
     height: mainWindowState.height,
-    minWidth: 700,
+    minWidth: 380,
     minHeight: 600,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

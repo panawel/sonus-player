@@ -1,5 +1,5 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronRight, ChevronLeft, MoreVertical, Search, X, Volume2, Volume1, VolumeX, Home } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronRight, ChevronLeft, ChevronDown, MoreVertical, Menu, Search, X, Volume2, Volume1, VolumeX, Home } from 'lucide-react';
 import { FastAverageColor } from 'fast-average-color';
 import { arrayMove } from '@dnd-kit/sortable';
 import TrackList from './TrackList.jsx';
@@ -23,6 +23,20 @@ const COMPACT_PANEL_BREAKPOINT = 900;
 // the title/subtitle to stay legible. A second, narrower tier than
 // COMPACT_PANEL_BREAKPOINT so icon-shrinking alone still happens first.
 const ULTRA_COMPACT_PANEL_BREAKPOINT = 780;
+// Below this, the whole app shell restructures into a single-column,
+// phone-portrait layout: the sidebar becomes an overlay drawer, the player
+// panel collapses to a mini bar (artwork + title/artist + Play only), and Now
+// Playing switches from its side-by-side Song/Lyrics split to a single
+// full-screen tab view. A strict subset of ULTRA_COMPACT_PANEL_BREAKPOINT, so
+// the icon-shrink tiers above still apply unchanged in the 560-900px range —
+// this tier is checked first and branches to different JSX entirely.
+const NARROW_LAYOUT_BREAKPOINT = 560;
+// Mini-player bar height in narrow mode (vs. the full panel's 124).
+const NARROW_PLAYER_PANEL_HEIGHT = 72;
+// Narrow drawer width — wide enough for icon+label rows (vs. the 88px
+// icon-only rail at full width, which only reads well as a slim persistent
+// column, not a drawer people expect to scan text in).
+const NARROW_DRAWER_WIDTH = 240;
 
 export default function App() {
   const [library, setLibrary] = useState([]);
@@ -72,6 +86,11 @@ export default function App() {
   // function (matching useState's own API) so both the toggle tab and the
   // ⌘\ keyboard shortcut can flip it without needing the current value in scope.
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => {
+    // A cold launch that starts out narrow must never show the drawer open
+    // for even one frame — check the width directly here (synchronous, before
+    // first paint) rather than relying on the isNarrowLayout effect below,
+    // which only corrects it a frame later and would otherwise flash open.
+    if (window.innerWidth <= NARROW_LAYOUT_BREAKPOINT) return true;
     try { return localStorage.getItem('sonus.sidebarCollapsed') === 'true'; } catch { return false; }
   });
   const setSidebarCollapsed = React.useCallback((updater) => {
@@ -150,6 +169,13 @@ export default function App() {
   const rightClusterWidth = useMeasuredWidth(rightClusterRef);
   const isCompactPanel = useIsNarrow(COMPACT_PANEL_BREAKPOINT);
   const isUltraCompactPanel = useIsNarrow(ULTRA_COMPACT_PANEL_BREAKPOINT);
+  const isNarrowLayout = useIsNarrow(NARROW_LAYOUT_BREAKPOINT);
+  // Entering narrow mode must never leave the sidebar's overlay drawer
+  // covering the whole screen by surprise — force it closed the moment the
+  // breakpoint crosses.
+  React.useEffect(() => {
+    if (isNarrowLayout) setSidebarCollapsed(true);
+  }, [isNarrowLayout, setSidebarCollapsed]);
   // Center the block within the true gap between the two clusters (not the
   // whole row — they're rarely equal width, so naive 50% centering drifts
   // into whichever side is wider), and cap its width to whatever's actually
@@ -900,6 +926,150 @@ export default function App() {
     else setRepeatMode('off');
   };
 
+  // Narrow Now Playing's transport row (shuffle/prev/play/next/repeat) reuses
+  // the exact same handlers/state as the desktop player panel — it just can't
+  // reuse the desktop panel's JSX directly, since there shuffle/repeat live in
+  // a separate cluster from prev/play/next (alongside volume), and that
+  // existing grouping must stay untouched at full width. Sizes are passed in
+  // rather than shared with isCompactPanel/isUltraCompactPanel, since this row
+  // has the full screen width available instead of sharing space with other
+  // clusters.
+  const renderTransportControls = ({ playSize, playIconSize, playMargin, controlSize, secondarySize }) => {
+    const ringSize = playSize + 8;
+    const ringRadius = ringSize / 2 - 2;
+    const ringCircumference = 2 * Math.PI * ringRadius;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <button className="player-control-button clickable" style={{ color: isShuffle ? 'var(--accent-color)' : 'var(--text-secondary)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
+          <Shuffle size={secondarySize} />
+        </button>
+        <button className="player-control-button skip-btn clickable" style={{ color: 'var(--text-primary)' }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
+          <SkipBack size={controlSize} fill="currentColor" />
+        </button>
+        <button
+          className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
+          style={{ width: playSize, height: playSize, color: 'var(--text-primary)', margin: `0 ${playMargin}px`, position: 'relative' }}
+          onClick={(e) => { e.stopPropagation(); handlePlayPauseClick(e); }}
+          onMouseDown={handlePlayPausePressStart}
+          onMouseUp={handlePlayPausePressEnd}
+          onMouseLeave={handlePlayPausePressEnd}
+          onTouchStart={handlePlayPausePressStart}
+          onTouchEnd={handlePlayPausePressEnd}
+        >
+          {isHoldingPlayPause && (
+            <svg width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`} style={{ position: 'absolute', top: -4, left: -4, pointerEvents: 'none' }}>
+              <circle
+                cx={ringSize / 2} cy={ringSize / 2} r={ringRadius}
+                fill="none"
+                stroke="#00f2fe"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeDasharray={ringCircumference}
+                strokeDashoffset={ringCircumference}
+                transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+                className="hold-ring-circle"
+              />
+            </svg>
+          )}
+          {isPlaying ? (
+            <Pause size={playIconSize} fill="currentColor" />
+          ) : (
+            <Play size={playIconSize} fill="currentColor" style={{ marginLeft: 2 }} />
+          )}
+        </button>
+        <button className="player-control-button skip-btn clickable" style={{ color: 'var(--text-primary)' }} onClick={(e) => { e.stopPropagation(); playNext(false); }}>
+          <SkipForward size={controlSize} fill="currentColor" />
+        </button>
+        <button className="player-control-button clickable" style={{ color: repeatMode !== 'off' ? 'var(--accent-color)' : 'var(--text-secondary)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
+          {repeatMode === 'one' ? <Repeat1 size={secondarySize} /> : <Repeat size={secondarySize} />}
+        </button>
+      </div>
+    );
+  };
+
+  // Shared "pill" search field — used by both the full-width floating search
+  // and the narrow top bar's search box, parameterized only by size, so the
+  // two contexts share one definition of what the field looks like rather
+  // than two hand-tuned copies that can drift apart from each other.
+  const renderSearchField = ({ width, height, fontSize }) => (
+    <div style={{ position: 'relative', width, flexShrink: 0 }}>
+      <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
+      <input
+        type="text"
+        className="wow-search-input"
+        placeholder="Search..."
+        value={searchQuery}
+        onChange={e => setSearchQuery(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Escape') setSearchQuery(''); }}
+        style={{
+          width: '100%', height, borderRadius: height / 2,
+          // Only reserves room for the clear button while there's actually a
+          // query to clear — at rest the text area gets the full width back.
+          padding: searchQuery ? '0 32px 0 34px' : '0 14px 0 34px',
+          background: 'var(--glass-bg)', borderWidth: 1, borderStyle: 'solid',
+          color: 'var(--text-primary)', outline: 'none', fontSize,
+          backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        }}
+      />
+      {searchQuery && (
+        <button
+          onClick={() => setSearchQuery('')}
+          title="Clear search"
+          style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 4, borderRadius: '50%' }}
+        >
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  );
+
+  // Shared mini-player bar (artwork + title/artist + Play) — used both as the
+  // docked bar in Library/Home (narrow mode) and, in narrow Now Playing's
+  // Lyrics tab, as a way to see/control playback without switching back to
+  // the Song tab. Only what tapping the bar does differs between the two.
+  const renderMiniPlayerBar = (onBarClick) => (
+    <div className="clickable" onClick={onBarClick} style={{ height: NARROW_PLAYER_PANEL_HEIGHT, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', background: 'var(--glass-panel)', backdropFilter: 'blur(40px)', cursor: 'default', zIndex: 6, flexShrink: 0 }}>
+      {currentTrack ? (
+        <>
+          <div className="player-artwork" style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--glass-border)', overflow: 'hidden', flexShrink: 0 }}>
+            {currentTrack.thumb ? <img src={currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={20} style={{ margin: 12 }} color="var(--text-secondary)" />}
+          </div>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.title}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.artist || ''}</div>
+          </div>
+          <button
+            className="clickable player-control-button"
+            style={{ padding: 6, color: 'var(--text-primary)', flexShrink: 0 }}
+            onClick={(e) => { e.stopPropagation(); playPrev(); }}
+          >
+            <SkipBack size={18} fill="currentColor" />
+          </button>
+          <button
+            className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
+            style={{ width: 36, height: 36, color: 'var(--text-primary)', flexShrink: 0 }}
+            // Deliberately togglePlay(), not handlePlayPauseClick() — see the
+            // comment where this button first appeared (App.jsx's Library
+            // mini-player) for why: that function only toggles when paired
+            // with handlePlayPausePressStart/End, which this bar never wires.
+            onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+          >
+            {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" style={{ marginLeft: 1 }} />}
+          </button>
+          <button
+            className="clickable player-control-button"
+            style={{ padding: 6, color: 'var(--text-primary)', flexShrink: 0 }}
+            onClick={(e) => { e.stopPropagation(); playNext(false); }}
+          >
+            <SkipForward size={18} fill="currentColor" />
+          </button>
+        </>
+      ) : (
+        <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Nothing playing</span>
+      )}
+    </div>
+  );
+
   const handleVolumeChange = (e) => {
     const val = parseFloat(e.target.value);
     setVolume(val);
@@ -1153,80 +1323,161 @@ export default function App() {
     >
       {/* Lives in the draggable title-bar strip above the Library panel, not inside it -
           centered over the panel's own width (sidebar width + half the remainder), not the
-          full window, so it doesn't drift over the sidebar or the "Library" title below. */}
-      {view === 'library' && (
-        <div style={{ position: 'fixed', top: 9, left: sidebarCollapsed ? '50vw' : 'calc(88px + (100vw - 88px) / 2)', transform: 'translateX(-50%)', zIndex: 50, WebkitAppRegion: 'no-drag', transition: 'left 0.25s ease' }}>
-          <div style={{ position: 'relative', width: 224 }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
-            <input
-              type="text"
-              className="wow-search-input"
-              placeholder="Search..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Escape') setSearchQuery(''); }}
-              style={{ width: '100%', height: 25, padding: '0 30px', background: 'var(--glass-bg)', borderWidth: 1, borderStyle: 'solid', borderRadius: 8, color: 'var(--text-primary)', outline: 'none', fontSize: 12, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                title="Clear search"
-                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 4 }}
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
+          full window, so it doesn't drift over the sidebar or the "Library" title below.
+          Same block, same position and size, in narrow mode too — narrow's sidebar never
+          takes layout space (it's an overlay), so it centers on the full window there,
+          same as the sidebarCollapsed case already does at full width. Hidden while the
+          narrow drawer is open, since this sits above the drawer's dimming backdrop and
+          would otherwise float there, interactive, over a dimmed screen — a concern that
+          doesn't exist at full width, where the sidebar never overlays content. */}
+      {view === 'library' && (!isNarrowLayout || sidebarCollapsed) && (
+        <div style={{ position: 'fixed', top: 9, left: (isNarrowLayout || sidebarCollapsed) ? '50vw' : 'calc(88px + (100vw - 88px) / 2)', transform: 'translateX(-50%)', zIndex: 50, WebkitAppRegion: 'no-drag', transition: 'left 0.25s ease' }}>
+          {renderSearchField({ width: isNarrowLayout ? 180 : 224, height: 28, fontSize: 12 })}
         </div>
       )}
 
-      {/* Sidebar */}
-      <div style={{ width: sidebarCollapsed ? 0 : 88, overflow: 'hidden', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: sidebarCollapsed ? '24px 0 0' : '0 8px', paddingTop: 24, transition: 'width 0.25s ease, padding 0.25s ease' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
-          <button
-            className={cx("glass-button clickable", { active: view === 'home' })}
-            style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px', background: view === 'home' ? 'var(--glass-active)' : undefined }}
-            onClick={() => setView('home')}
-          >
-            <Home size={18} />
-            <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Home</span>
-          </button>
-          <button
-            className={cx("glass-button", { active: view === 'library' })}
-            style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px', background: view === 'library' ? 'var(--glass-active)' : undefined }}
-            onClick={() => setView('library')}
-          >
-            <ListMusic size={18} />
-            <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Library</span>
-          </button>
+      {/* Narrow mode: "Home" label, same strip/position search would occupy
+          on Library — steps aside while the drawer is open, same reasoning
+          as search above. */}
+      {isNarrowLayout && !isNowPlayingOpen && view === 'home' && sidebarCollapsed && (
+        <div style={{ position: 'fixed', top: 9, left: '50vw', transform: 'translateX(-50%)', zIndex: 50, WebkitAppRegion: 'no-drag' }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>Home</span>
         </div>
+      )}
 
-        <div style={{ marginTop: 'auto', marginBottom: 24, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
-          <button
-            className="glass-button"
-            style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px' }}
-            onClick={handleAddFiles}
-          >
-            <Music size={18} />
-            <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Add Files</span>
-          </button>
-        </div>
+      {/* Narrow mode: hamburger lives in the draggable strip itself instead of
+          its own row below — that row used to cost 42-58px of vertical space
+          for one icon, all of it coming straight out of the track list's
+          share of the window. Right-aligned since the traffic lights always
+          occupy the left edge, so there's no collision risk. Unlike search/
+          the Home label above, this stays visible (and toggles to a close
+          icon) regardless of drawer state — it's the drawer's own open/close
+          control, not something the drawer should be able to hide. */}
+      {isNarrowLayout && !isNowPlayingOpen && (view === 'library' || view === 'home') && (
+        <button
+          className="clickable player-control-button"
+          style={{ position: 'fixed', top: 2, right: 16, zIndex: 51, color: 'var(--text-primary)', padding: 10, WebkitAppRegion: 'no-drag' }}
+          onClick={() => setSidebarCollapsed(v => !v)}
+        >
+          {sidebarCollapsed ? <Menu size={18} /> : <X size={18} />}
+        </button>
+      )}
+
+      {/* Narrow-mode backdrop: dims the content while the sidebar drawer is
+          open, tap to dismiss. Only relevant in narrow mode — at full width
+          the sidebar pushes content instead of overlaying it. */}
+      {isNarrowLayout && !sidebarCollapsed && (
+        <div className="clickable sidebar-drawer-backdrop" onClick={() => setSidebarCollapsed(true)} />
+      )}
+
+      {/* Sidebar — in narrow mode this becomes a fixed overlay drawer (see
+          .sidebar-drawer in index.css), wider than the full-width icon rail
+          and starts right below the drag-strip (top: 42, from .sidebar-drawer
+          in index.css) — the hamburger now lives inside that strip itself
+          rather than a row of its own below it, so there's nothing left for
+          the drawer's own content to clear; a plain 20px top padding is just
+          breathing room, not a collision guard. Full-width mode's
+          width/padding stay byte-identical to before. */}
+      <div
+        className={cx({ 'sidebar-drawer': isNarrowLayout })}
+        style={{
+          width: isNarrowLayout ? (sidebarCollapsed ? 0 : NARROW_DRAWER_WIDTH) : (sidebarCollapsed ? 0 : 88),
+          overflow: 'hidden', flexShrink: 0, display: 'flex', flexDirection: 'column',
+          padding: isNarrowLayout
+            ? (sidebarCollapsed ? '20px 0 0' : '20px 12px 0')
+            : (sidebarCollapsed ? '24px 0 0' : '0 8px'),
+          ...(isNarrowLayout ? {} : { paddingTop: 24 }),
+          transition: 'width 0.25s ease, padding 0.25s ease',
+        }}
+      >
+        {isNarrowLayout ? (
+          <>
+            {/* Narrow mode: wide rows (icon + label side by side) — the
+                stacked icon-over-text tiles only read well in the slim 88px
+                full-width rail. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
+              <button
+                className="clickable narrow-drawer-item"
+                style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '12px 14px', borderRadius: 10, background: view === 'home' ? 'var(--glass-active)' : 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 14, fontWeight: 600, textAlign: 'left' }}
+                onClick={() => { setView('home'); setSidebarCollapsed(true); }}
+              >
+                <Home size={20} />
+                <span>Home</span>
+              </button>
+              <button
+                className="clickable narrow-drawer-item"
+                style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '12px 14px', borderRadius: 10, background: view === 'library' ? 'var(--glass-active)' : 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 14, fontWeight: 600, textAlign: 'left' }}
+                onClick={() => { setView('library'); setSidebarCollapsed(true); }}
+              >
+                <ListMusic size={20} />
+                <span>Library</span>
+              </button>
+            </div>
+
+            <div style={{ marginTop: 'auto', marginBottom: 16, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
+              <button
+                className="clickable narrow-drawer-item"
+                style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '12px 14px', borderRadius: 10, background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 14, fontWeight: 600, textAlign: 'left' }}
+                onClick={() => { handleAddFiles(); setSidebarCollapsed(true); }}
+              >
+                <Music size={20} />
+                <span>Add Files</span>
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
+              <button
+                className={cx("glass-button clickable", { active: view === 'home' })}
+                style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px', background: view === 'home' ? 'var(--glass-active)' : undefined }}
+                onClick={() => setView('home')}
+              >
+                <Home size={18} />
+                <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Home</span>
+              </button>
+              <button
+                className={cx("glass-button", { active: view === 'library' })}
+                style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px', background: view === 'library' ? 'var(--glass-active)' : undefined }}
+                onClick={() => setView('library')}
+              >
+                <ListMusic size={18} />
+                <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Library</span>
+              </button>
+            </div>
+
+            <div style={{ marginTop: 'auto', marginBottom: 24, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
+              <button
+                className="glass-button"
+                style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px' }}
+                onClick={handleAddFiles}
+              >
+                <Music size={18} />
+                <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Add Files</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Sidebar toggle tab — a sibling of the sidebar (not nested inside it), so its
-          position animates between two fixed points rather than being carried to a
-          negative/off-window coordinate as the sidebar's own width collapses to 0. */}
-      <button
-        className="clickable sidebar-toggle-tab"
-        title={sidebarCollapsed ? 'Show sidebar (⌘\\)' : 'Hide sidebar (⌘\\)'}
-        style={{ left: sidebarCollapsed ? 4 : 84 }}
-        onClick={() => setSidebarCollapsed(v => !v)}
-      >
-        {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-      </button>
+      {/* Sidebar toggle tab — full-width mode only; narrow mode's hamburger
+          button (in the narrow top bar, below) replaces it as the drawer
+          trigger, since a pull-tab at the content edge doesn't fit an overlay
+          drawer the same way. */}
+      {!isNarrowLayout && (
+        <button
+          className="clickable sidebar-toggle-tab"
+          title={sidebarCollapsed ? 'Show sidebar (⌘\\)' : 'Hide sidebar (⌘\\)'}
+          style={{ left: sidebarCollapsed ? 4 : 84 }}
+          onClick={() => setSidebarCollapsed(v => !v)}
+        >
+          {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+        </button>
+      )}
 
       {/* Main Content Area */}
-      <div className="glass-panel" style={{ flex: 1, borderRadius: sidebarCollapsed ? 16 : '16px 0 0 16px', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', transition: 'border-radius 0.25s ease' }}>
+      <div className="glass-panel" style={{ flex: 1, borderRadius: (isNarrowLayout || sidebarCollapsed) ? 16 : '16px 0 0 16px', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', transition: 'border-radius 0.25s ease' }}>
+
         {/* Column header, deliberately a SIBLING above .scrollable rather than
             sticky inside it — rows then physically cannot pass behind the
             labels, so the bar needs no background and never changes on scroll.
@@ -1239,7 +1490,7 @@ export default function App() {
           // whether or not the list is long enough to scroll — otherwise a short
           // library would misalign in the opposite direction. The smoke suite
           // asserts Time sits exactly over the duration column.
-          <div style={{ flexShrink: 0, padding: '16px 38px 6px 32px', visibility: isNowPlayingOpen ? 'hidden' : 'visible' }}>
+          <div style={{ flexShrink: 0, padding: isNarrowLayout ? '8px 22px 6px 16px' : '16px 38px 6px 32px', visibility: isNowPlayingOpen ? 'hidden' : 'visible' }}>
             <TrackListHeader
               sort={librarySortApi.sort}
               onCycleColumn={librarySortApi.cycleColumn}
@@ -1265,8 +1516,9 @@ export default function App() {
             flex: 1,
             // No top padding for Library: the header block above the scroller
             // already supplies it, and rows should start immediately under the
-            // rule. Home and the detail views keep the original 32px.
-            padding: showLibrary ? '0 32px 32px' : 32,
+            // rule. Home and the detail views keep the original 32px (16px in
+            // narrow mode, where every pixel of width is precious).
+            padding: showLibrary ? (isNarrowLayout ? '0 16px 16px' : '0 32px 32px') : (isNarrowLayout ? 16 : 32),
             overflowY: 'auto',
             // Reserve the scrollbar gutter on Library so the header above (which
             // is outside this scroller) can compensate with a fixed 6px rather
@@ -1383,11 +1635,16 @@ export default function App() {
             here since the whole thing (panel + content) fades as one unit. */}
         <div
           style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 124,
+            position: 'absolute', top: 0, left: 0, right: 0,
+            // Narrow mode: Now Playing is a full dedicated screen (matching the
+            // reference), so it covers all the way down — the mini-player bar
+            // below is unrendered while NP is open, rather than staying docked
+            // underneath it the way the full-width player panel always does.
+            bottom: isNarrowLayout ? 0 : 124,
             pointerEvents: isNowPlayingOpen ? 'auto' : 'none',
             zIndex: 5,
             WebkitAppRegion: 'no-drag',
-            clipPath: 'inset(0 0 0 0 round 16px 0 0 0)',
+            clipPath: (isNarrowLayout || sidebarCollapsed) ? 'inset(0 0 0 0 round 16px)' : 'inset(0 0 0 0 round 16px 0 0 0)',
           }}
         >
           <div
@@ -1439,6 +1696,136 @@ export default function App() {
                 </div>
               </div>
             )}
+            {isNarrowLayout ? (
+              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', padding: '16px 20px 24px', boxSizing: 'border-box' }}>
+                {/* Top bar: back chevron, Song|Lyrics tabs, track menu */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, marginBottom: 8 }}>
+                  <button className="player-control-button clickable" style={{ color: 'rgba(255,255,255,0.85)' }} onClick={(e) => { e.stopPropagation(); collapseNowPlaying(); }}>
+                    <ChevronDown size={20} />
+                  </button>
+                  {/* Only a track with lyrics actually has two tabs to switch
+                      between — for one with none, there's nothing to label. */}
+                  {currentTrack?.lyrics && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 15, fontWeight: 700 }}>
+                      <span className="clickable" style={{ color: !isLyricsOpen ? '#fff' : 'rgba(255,255,255,0.4)', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setIsLyricsOpen(false); }}>Song</span>
+                      <span style={{ color: 'rgba(255,255,255,0.25)', fontWeight: 400 }}>|</span>
+                      <span className="clickable" style={{ color: isLyricsOpen ? '#fff' : 'rgba(255,255,255,0.4)', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setIsLyricsOpen(true); }}>Lyrics</span>
+                    </div>
+                  )}
+                  <button
+                    className="player-control-button clickable"
+                    style={{ color: 'rgba(255,255,255,0.85)', visibility: currentTrack ? 'visible' : 'hidden' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (trackMenu) { setTrackMenu(null); return; }
+                      if (currentTrack) setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' });
+                    }}
+                  >
+                    <MoreVertical size={20} />
+                  </button>
+                </div>
+
+                {!currentTrack ? (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                    <Music size={48} style={{ opacity: 0.5, marginBottom: 16 }} />
+                    <p>Play a track to see it here.</p>
+                  </div>
+                ) : (isLyricsOpen && currentTrack.lyrics) ? (
+                  /* Lyrics tab — same content as the desktop side panel, full width.
+                     Gated on currentTrack.lyrics too (not just isLyricsOpen) so a
+                     track change to one with no lyrics falls back to the Song tab
+                     automatically, matching the now-hidden tab label above.
+                     Includes the same mini-player bar Library uses (below), so
+                     there's still a way to see/control playback while reading
+                     lyrics instead of the screen being lyrics-only. Tapping it
+                     switches back to the Song tab, rather than expandNowPlaying
+                     (Library's version) — we're already in Now Playing here. */
+                  <>
+                    <div ref={lyricsScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
+                      {currentTrack.lyrics ? (
+                        <div style={{ fontSize: 15, lineHeight: 1.8, color: 'rgba(255,255,255,0.82)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'rgba(255,255,255,0.35)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
+                      )}
+                    </div>
+                    {/* Negative margins cancel this wrapper's own padding so the
+                        bar spans full width and sits flush at the bottom, same
+                        as Library's — the NP overlay's own clip-path already
+                        rounds whatever reaches its edges, so no radius needed here. */}
+                    <div style={{ margin: '8px -20px -24px' }}>
+                      {renderMiniPlayerBar(() => setIsLyricsOpen(false))}
+                    </div>
+                  </>
+                ) : (
+                  /* Song tab */
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 }}>
+                      {/* Shrinks to fit whatever space this flex:1/minHeight:0
+                          row actually has left (both width AND height), rather
+                          than a flat vh fraction of the whole window — the
+                          latter doesn't know about the top bar/title/volume/
+                          seek/transport rows sharing this same column, and
+                          overflows into the title on short windows. */}
+                      <div style={{ position: 'relative', width: '100%', maxWidth: 420, maxHeight: '100%', aspectRatio: '1 / 1' }}>
+                        {artworkRgb && (
+                          <div style={{ position: 'absolute', inset: '-30%', borderRadius: '50%', filter: 'blur(60px)', background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.5)`, zIndex: 0, pointerEvents: 'none' }} />
+                        )}
+                        <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', borderRadius: 20, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 24px 60px rgba(0,0,0,0.6)' }}>
+                          {(npArtwork || currentTrack.thumb) ? (
+                            <img src={npArtwork || currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', background: 'var(--glass-active)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Music size={64} color="var(--text-secondary)" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: 'center', flexShrink: 0, marginBottom: 12 }}>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.title}</div>
+                      <div style={{ fontSize: 15, color: 'var(--text-secondary)' }}>
+                        {playerArtistTokens.map((token, i) => (
+                          <span key={`${i}:${token}`}>
+                            {i > 0 && ' & '}
+                            <span className="player-meta-link" onClick={(e) => { e.stopPropagation(); setHomeDetailOrigin(view); setView('home'); setHomeDetailItem({ type: 'artist', key: token }); }}>{token}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Seek bar — same input/handlers as the desktop panel's top
+                        bar; no dedicated skip +/-10s buttons since Sonus has no
+                        such control today (only the global ArrowLeft/Right ±5s
+                        shortcut, which keeps working unchanged). */}
+                    <div style={{ flexShrink: 0, marginBottom: 8 }}>
+                      <input
+                        type="range" min="0" max={duration || 100}
+                        value={isSeeking ? seekValue : currentTime}
+                        onChange={handleSeekChange}
+                        onMouseDown={handleSeekMouseDown}
+                        onMouseUp={handleSeekMouseUp}
+                        onTouchStart={handleSeekMouseDown}
+                        onTouchEnd={handleSeekMouseUp}
+                        className="clickable top-progress-bar top-progress-bar--hovered wow-slider"
+                        style={{ '--progress': `${duration ? ((isSeeking ? seekValue : currentTime) / duration) * 100 : 0}%` }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+                        <span>{formatTime(isSeeking ? seekValue : currentTime)}</span>
+                        <span>{formatTime(duration)}</span>
+                      </div>
+                    </div>
+
+                    {/* Transport — reuses the same handlers/state as the desktop
+                        player panel via renderTransportControls (see above). */}
+                    <div style={{ flexShrink: 0 }}>
+                      {renderTransportControls({ playSize: 64, playIconSize: 30, playMargin: 18, controlSize: 26, secondarySize: 22 })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+            <>
             <button
               className="player-control-button clickable"
               style={{ position: 'absolute', top: 16, left: 16, zIndex: 2, display: 'flex', alignItems: 'center', gap: 4, color: 'rgba(255,255,255,0.65)', fontSize: 13, fontWeight: 600, maxWidth: 'calc(50% - 32px)' }}
@@ -1548,10 +1935,20 @@ export default function App() {
                 </>
               )}
             </div>
+            </>
+            )}
           </div>
         </div>
 
-        {/* Bottom Player Controls */}
+        {/* Mini-player (narrow mode, Now Playing closed): artwork + title/artist
+            + Play only — full transport controls live in narrow Now Playing
+            instead (see the NP branch above). Hidden while NP is open so it
+            doesn't show underneath NP's now full-screen overlay. Tapping it
+            opens Now Playing, same as the full desktop panel does. */}
+        {isNarrowLayout && !isNowPlayingOpen && renderMiniPlayerBar(expandNowPlaying)}
+
+        {/* Bottom Player Controls — full width only, byte-identical to before. */}
+        {!isNarrowLayout && (
         <div
           className="clickable"
           onClick={isNowPlayingOpen ? collapseNowPlaying : expandNowPlaying}
@@ -1755,10 +2152,11 @@ export default function App() {
            </div>
           </div>
         </div>
+        )}
       </div>
-      
+
       {currentTrack && (
-        <audio 
+        <audio
           ref={audioRef}
           src={window.electronAPI ? window.electronAPI.getAudioSrc(currentTrack.filePath) : ''}
           autoPlay
@@ -1823,7 +2221,7 @@ export default function App() {
       {/* Custom dropdown — track list 3-dots and Now Playing ⋮ */}
       {toast && (
         <div style={{
-          position: 'fixed', bottom: 140, left: '50%', transform: 'translateX(-50%)',
+          position: 'fixed', bottom: isNarrowLayout ? NARROW_PLAYER_PANEL_HEIGHT + 16 : 140, left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(24,24,28,0.95)', backdropFilter: 'blur(20px)',
           color: 'var(--text-primary)', padding: '10px 18px', borderRadius: 10,
           fontSize: 13, fontWeight: 500, zIndex: 2000,
