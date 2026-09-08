@@ -33,14 +33,16 @@ REPLACEMENT_PATH = "~/Music/Eminem/The Eminem Show/14 Hallie's Song.mp3"
 
 # name -> (source file, needs redaction)
 MAPPING = {
-    "hero":          ("Screenshot 2026-08-15 at 23.35.20.png", False),
-    "library":       ("Screenshot 2026-08-15 at 23.34.53.png", False),
-    "home":          ("Screenshot 2026-08-15 at 23.37.43.png", False),
-    "stats":         ("Screenshot 2026-08-15 at 23.41.59.png", False),
-    "now-playing":   ("Screenshot 2026-08-15 at 23.36.15.png", False),
-    "artist":        ("Screenshot 2026-08-15 at 23.41.09.png", False),
-    "tag-editor":    ("Screenshot 2026-08-15 at 23.38.42.png", True),
-    "search-online": ("Screenshot 2026-08-15 at 23.38.59.png", True),
+    "hero":              ("Screenshot 2026-08-15 at 23.35.20.png", False),
+    "library":           ("library-columns.png", False),
+    "home":              ("Screenshot 2026-08-15 at 23.37.43.png", False),
+    "stats":             ("Screenshot 2026-08-15 at 23.41.59.png", False),
+    "now-playing":       ("Screenshot 2026-08-15 at 23.36.15.png", False),
+    "artist":            ("Screenshot 2026-08-15 at 23.41.09.png", False),
+    "tag-editor":        ("Screenshot 2026-08-15 at 23.38.42.png", True),
+    "search-online":     ("Screenshot 2026-08-15 at 23.38.59.png", True),
+    "narrow-library":    ("narrow-library.png", False),
+    "narrow-now-playing": ("narrow-now-playing.png", False),
 }
 
 
@@ -108,8 +110,12 @@ def main():
             im = Image.alpha_composite(bg, im)
         im = im.convert("RGB")
 
+        # Downscale only — a narrow-window capture (e.g. the phone-portrait
+        # screenshots) is natively well under TARGET_WIDTH, and upscaling it
+        # would just blur a screenshot that's already at its real resolution.
         w, h = im.size
-        im = im.resize((TARGET_WIDTH, round(h * TARGET_WIDTH / w)), Image.LANCZOS)
+        if w > TARGET_WIDTH:
+            im = im.resize((TARGET_WIDTH, round(h * TARGET_WIDTH / w)), Image.LANCZOS)
 
         dest = OUT / f"{name}.png"
         im.save(dest, "PNG", optimize=True)
