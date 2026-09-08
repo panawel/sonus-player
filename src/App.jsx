@@ -12,7 +12,10 @@ import HomeView from './HomeView';
 import HomeDetailView from './HomeDetailView';
 import cx from 'classnames';
 import { splitArtists, isRTL } from './audioUtils.js';
-import { LIBRARY_EXTRA_COLUMNS } from './trackUtils.js';
+import {
+  LIBRARY_EXTRA_COLUMNS, ULTRA_COMPACT_PANEL_BREAKPOINT,
+  LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT, extraColumnFitCount,
+} from './trackUtils.js';
 import './index.css';
 
 // Below this, Player Panel controls (Skip/Play/volume/repeat/shuffle) shrink
@@ -23,7 +26,8 @@ const COMPACT_PANEL_BREAKPOINT = 900;
 // transport buttons) and the center artwork shrinks, freeing enough room for
 // the title/subtitle to stay legible. A second, narrower tier than
 // COMPACT_PANEL_BREAKPOINT so icon-shrinking alone still happens first.
-const ULTRA_COMPACT_PANEL_BREAKPOINT = 780;
+// (Imported from trackUtils.js, not defined here — HomeDetailView.jsx reuses
+// the exact same value for its own extra-columns cascade, see below.)
 // Below this, the whole app shell restructures into a single-column,
 // phone-portrait layout: the sidebar becomes an overlay drawer, the player
 // panel collapses to a mini bar (artwork + title/artist + Play only), and Now
@@ -39,14 +43,10 @@ const NARROW_PLAYER_PANEL_HEIGHT = 72;
 // column, not a drawer people expect to scan text in).
 const NARROW_DRAWER_WIDTH = 240;
 
-// Library's extra columns (Album/Year/Genre, LIBRARY_EXTRA_COLUMNS in
-// trackUtils.js) drop off one at a time, right to left, as the window
-// narrows. The lowest tier deliberately reuses ULTRA_COMPACT_PANEL_BREAKPOINT
-// (780) rather than its own constant: smokeTest.mjs has a hardcoded check
-// that resizes to 700px and expects Library's header/rows to show no extra
-// columns, so this cutoff must stay above 700.
-const LIBRARY_YEAR_COL_BREAKPOINT = 900;
-const LIBRARY_GENRE_COL_BREAKPOINT = 1000;
+// Library's extra columns (Album/Year/Genre) drop off one at a time, right to
+// left, as the window narrows. Breakpoints/rationale live in trackUtils.js
+// (LIBRARY_YEAR_COL_BREAKPOINT / LIBRARY_GENRE_COL_BREAKPOINT), shared with
+// HomeDetailView.jsx's own extra columns.
 
 export default function App() {
   const [library, setLibrary] = useState([]);
@@ -180,16 +180,13 @@ export default function App() {
   const isCompactPanel = useIsNarrow(COMPACT_PANEL_BREAKPOINT);
   const isUltraCompactPanel = useIsNarrow(ULTRA_COMPACT_PANEL_BREAKPOINT);
   const isNarrowLayout = useIsNarrow(NARROW_LAYOUT_BREAKPOINT);
-  // How many of LIBRARY_EXTRA_COLUMNS currently fit. Each wider threshold
-  // implies the narrower ones, so this is a plain cascade rather than three
-  // independent checks; the Album cutoff reuses isUltraCompactPanel.
+  // How many of LIBRARY_EXTRA_COLUMNS currently fit; the Album cutoff reuses
+  // isUltraCompactPanel (see trackUtils.js for the cascade + why).
   const isLibraryYearColHidden = useIsNarrow(LIBRARY_YEAR_COL_BREAKPOINT);
   const isLibraryGenreColHidden = useIsNarrow(LIBRARY_GENRE_COL_BREAKPOINT);
-  const visibleLibraryColumnCount = isUltraCompactPanel ? 0
-    : isLibraryYearColHidden ? 1
-    : isLibraryGenreColHidden ? 2
-    : 3;
-  const visibleLibraryExtraColumns = LIBRARY_EXTRA_COLUMNS.slice(0, visibleLibraryColumnCount);
+  const visibleLibraryExtraColumns = LIBRARY_EXTRA_COLUMNS.slice(
+    0, extraColumnFitCount(isUltraCompactPanel, isLibraryYearColHidden, isLibraryGenreColHidden)
+  );
   // Entering narrow mode must never leave the sidebar's overlay drawer
   // covering the whole screen by surprise — force it closed the moment the
   // breakpoint crosses.
@@ -1378,14 +1375,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Narrow mode: "Home" label, same strip/position search would occupy
-          on Library — steps aside while the drawer is open, same reasoning
-          as search above. */}
-      {isNarrowLayout && !isNowPlayingOpen && view === 'home' && sidebarCollapsed && (
-        <div style={{ position: 'fixed', top: 9, left: '50vw', transform: 'translateX(-50%)', zIndex: 50, WebkitAppRegion: 'no-drag' }}>
-          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>Home</span>
-        </div>
-      )}
 
       {/* Sidebar toggle — the same hamburger in the same drag-strip spot at
           every window width, not just narrow. Right-aligned since the

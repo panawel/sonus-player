@@ -92,6 +92,44 @@ export function displayValueForColumn(track, columnId) {
   }
 }
 
+// Width thresholds for LIBRARY_EXTRA_COLUMNS visibility, shared by App.jsx
+// (Library) and HomeDetailView.jsx (artist/album/year/etc. detail pages) —
+// live here rather than in either component so both can import the same
+// numbers without a circular import between them. Below
+// ULTRA_COMPACT_PANEL_BREAKPOINT all extra columns are hidden; App.jsx also
+// reuses that same breakpoint for its own (unrelated) player-panel sizing,
+// one fewer constant to keep in sync. **Must stay above 700**:
+// electron/smokeTest.mjs has a hardcoded check that resizes to 700px and
+// expects Library's header/rows to show no extra columns.
+export const ULTRA_COMPACT_PANEL_BREAKPOINT = 780;
+export const LIBRARY_YEAR_COL_BREAKPOINT = 900;
+export const LIBRARY_GENRE_COL_BREAKPOINT = 1000;
+
+// 0..3 — how many of an ordered extra-columns list currently fit, given the
+// three width tiers above. Each wider threshold implies the narrower ones,
+// so this is a plain cascade rather than three independent checks.
+export function extraColumnFitCount(isAlbumTierHidden, isYearTierHidden, isGenreTierHidden) {
+  return isAlbumTierHidden ? 0 : isYearTierHidden ? 1 : isGenreTierHidden ? 2 : 3;
+}
+
+// Which of LIBRARY_EXTRA_COLUMNS make sense on a given Home detail page —
+// suppresses a column that would be redundant for the page you're already
+// on: an Album page filters to one album, so its own Album column is dead
+// weight (matches Library's TrackListHeader/TrackRow, which never show a
+// combined Album cell either); a Year page — or the "Missing Year" metadata
+// page — means every row already shares or lacks that exact year. Order is
+// preserved from LIBRARY_EXTRA_COLUMNS, so the same right-to-left breakpoint
+// slicing (extraColumnFitCount above) still applies to whatever's left.
+export function detailExtraColumns(item) {
+  return LIBRARY_EXTRA_COLUMNS.filter(col => {
+    if (col.id === 'album') return item.type !== 'album';
+    if (col.id === 'year') {
+      return !(item.type === 'year' || (item.type === 'missing-metadata' && item.key === 'year'));
+    }
+    return true;
+  });
+}
+
 // The next state for a column, given the current sort. A sort that isn't in
 // this column's cycle isn't found, so the -1 wraps to index 0 — which is
 // exactly right: clicking a different column starts that column's cycle from

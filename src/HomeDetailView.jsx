@@ -4,6 +4,11 @@ import TrackList from './TrackList.jsx';
 import TrackListHeader from './TrackListHeader.jsx';
 import { useTrackSort } from './useTrackSort.js';
 import { useTrackSelection } from './useTrackSelection.js';
+import { useIsNarrow } from './useIsNarrow.js';
+import {
+  ULTRA_COMPACT_PANEL_BREAKPOINT, LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT,
+  extraColumnFitCount, detailExtraColumns,
+} from './trackUtils.js';
 
 const MISSING_TITLES = { art: 'Missing Art', year: 'Missing Year', lyrics: 'Missing Lyrics' };
 import { snapToTier, splitArtists, detectScript } from './audioUtils.js';
@@ -16,6 +21,18 @@ function formatDuration(sec) {
 }
 
 export default function HomeDetailView({ item, library, currentTrack, isPlaying, playTrack, togglePlay, playAllTracks, onShowMenu, onRemoveTracks, onBack, backLabel = 'Home', savedScrollTop = 0, onScrollChange, density, onDensityChange, selectionRegistryRef }) {
+  // Same extra-columns mechanism Library uses (App.jsx), just with a
+  // per-page-type filter first — see detailExtraColumns in trackUtils.js for
+  // which column gets suppressed on which page (e.g. no Album column on an
+  // Album page). Independent useIsNarrow subscriptions from App.jsx's own,
+  // but the same shared breakpoint constants, so the two can never drift.
+  const isAlbumColTierHidden = useIsNarrow(ULTRA_COMPACT_PANEL_BREAKPOINT);
+  const isYearColTierHidden = useIsNarrow(LIBRARY_YEAR_COL_BREAKPOINT);
+  const isGenreColTierHidden = useIsNarrow(LIBRARY_GENRE_COL_BREAKPOINT);
+  const visibleExtraColumns = detailExtraColumns(item).slice(
+    0, extraColumnFitCount(isAlbumColTierHidden, isYearColTierHidden, isGenreColTierHidden)
+  );
+
   const tracks = useMemo(() => {
     if (item.type === 'album') return library.filter(t => (t.album || '').toLowerCase() === item.key.toLowerCase());
     if (item.type === 'year') {
@@ -218,7 +235,8 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
           onCycleColumn={sortApi.cycleColumn}
           density={density}
           onDensityChange={onDensityChange}
-          showAlbum={item.type !== 'album'}
+          showAlbum={false}
+          extraColumns={visibleExtraColumns}
         />
       </div>
 
@@ -240,7 +258,8 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
           onShowMenu={onShowMenu}
           onRemoveTracks={onRemoveTracks}
           scrollElRef={innerScrollRef}
-          showAlbum={item.type !== 'album'}
+          showAlbum={false}
+          extraColumns={visibleExtraColumns}
           initialOffset={savedScrollTop}
         />
       </div>

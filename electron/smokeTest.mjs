@@ -503,8 +503,13 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         if (dRow && dLabels.length) {
           out.detailTitleLabelX = Math.round(dLabels[0].getBoundingClientRect().left);
           out.detailRowTitleX = Math.round(dRow.children[2].getBoundingClientRect().left);
-          out.detailTimeLabelRight = Math.round(dLabels[dLabels.length - 1].getBoundingClientRect().right);
-          out.detailRowTimeRight = Math.round(dRow.children[dRow.children.length - 1].getBoundingClientRect().right);
+          // Selected by label/class rather than position: an artist detail
+          // page now gets the same extra columns as Library, so Duration is
+          // no longer necessarily the last header label or row child.
+          const dTimeLabel = dLabels.find(l => l.textContent.trim() === 'Time');
+          const dDurationCell = dRow.querySelector('.track-row-duration');
+          out.detailTimeLabelRight = dTimeLabel ? Math.round(dTimeLabel.getBoundingClientRect().right) : null;
+          out.detailRowTimeRight = dDurationCell ? Math.round(dDurationCell.getBoundingClientRect().right) : null;
         }
         window.__sonusTest.closeDetail();
         window.__sonusTest.setView('library');

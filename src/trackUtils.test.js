@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   formatTime, compareBy, sortTracks, getSortValue, SORT_FIELDS, sortFieldById,
   COLUMN_CYCLES, nextInCycle, activeFieldForColumn, MANUAL_SORT,
+  extraColumnFitCount, detailExtraColumns, LIBRARY_EXTRA_COLUMNS,
 } from './trackUtils.js';
 
 const t = (over = {}) => ({
@@ -157,5 +158,45 @@ describe('activeFieldForColumn', () => {
   it('is null for other columns and for manual', () => {
     expect(activeFieldForColumn('duration', { field: 'artist', dir: 'asc' })).toBeNull();
     expect(activeFieldForColumn('title', MANUAL_SORT)).toBeNull();
+  });
+});
+
+describe('extraColumnFitCount', () => {
+  it('cascades 0 through 3 as each tier unhides', () => {
+    expect(extraColumnFitCount(true, true, true)).toBe(0);
+    expect(extraColumnFitCount(false, true, true)).toBe(1);
+    expect(extraColumnFitCount(false, false, true)).toBe(2);
+    expect(extraColumnFitCount(false, false, false)).toBe(3);
+  });
+});
+
+describe('detailExtraColumns', () => {
+  const ids = (item) => detailExtraColumns(item).map(c => c.id);
+
+  it('keeps every column for a page with nothing redundant (artist, quality, language, missing art/lyrics)', () => {
+    for (const item of [
+      { type: 'artist', key: 'Some Artist' },
+      { type: 'bitrate', key: '320' },
+      { type: 'language', key: 'latin' },
+      { type: 'missing-metadata', key: 'art' },
+      { type: 'missing-metadata', key: 'lyrics' },
+    ]) {
+      expect(ids(item)).toEqual(LIBRARY_EXTRA_COLUMNS.map(c => c.id));
+    }
+  });
+
+  it('drops Album on an album page', () => {
+    expect(ids({ type: 'album', key: 'Some Album' })).toEqual(['year', 'genre']);
+  });
+
+  it('drops Year on a year page, and on the Missing Year page', () => {
+    expect(ids({ type: 'year', key: '1999' })).toEqual(['album', 'genre']);
+    expect(ids({ type: 'missing-metadata', key: 'year' })).toEqual(['album', 'genre']);
+  });
+
+  it('preserves LIBRARY_EXTRA_COLUMNS order so right-to-left slicing still applies', () => {
+    // Genre (last) must still be the first to go when the filtered list is sliced.
+    const filtered = detailExtraColumns({ type: 'album', key: 'x' });
+    expect(filtered.slice(0, 1).map(c => c.id)).toEqual(['year']);
   });
 });
