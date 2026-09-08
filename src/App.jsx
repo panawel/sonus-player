@@ -1,5 +1,5 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronRight, ChevronLeft, ChevronDown, MoreVertical, Menu, Search, X, Volume2, Volume1, VolumeX, Home } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, ChevronDown, MoreVertical, Menu, Search, X, Volume2, Volume1, VolumeX, Home, Mic2 } from 'lucide-react';
 import { FastAverageColor } from 'fast-average-color';
 import { arrayMove } from '@dnd-kit/sortable';
 import TrackList from './TrackList.jsx';
@@ -12,6 +12,7 @@ import HomeView from './HomeView';
 import HomeDetailView from './HomeDetailView';
 import cx from 'classnames';
 import { splitArtists, isRTL } from './audioUtils.js';
+import { LIBRARY_EXTRA_COLUMNS } from './trackUtils.js';
 import './index.css';
 
 // Below this, Player Panel controls (Skip/Play/volume/repeat/shuffle) shrink
@@ -37,6 +38,15 @@ const NARROW_PLAYER_PANEL_HEIGHT = 72;
 // icon-only rail at full width, which only reads well as a slim persistent
 // column, not a drawer people expect to scan text in).
 const NARROW_DRAWER_WIDTH = 240;
+
+// Library's extra columns (Album/Year/Genre, LIBRARY_EXTRA_COLUMNS in
+// trackUtils.js) drop off one at a time, right to left, as the window
+// narrows. The lowest tier deliberately reuses ULTRA_COMPACT_PANEL_BREAKPOINT
+// (780) rather than its own constant: smokeTest.mjs has a hardcoded check
+// that resizes to 700px and expects Library's header/rows to show no extra
+// columns, so this cutoff must stay above 700.
+const LIBRARY_YEAR_COL_BREAKPOINT = 900;
+const LIBRARY_GENRE_COL_BREAKPOINT = 1000;
 
 export default function App() {
   const [library, setLibrary] = useState([]);
@@ -170,6 +180,16 @@ export default function App() {
   const isCompactPanel = useIsNarrow(COMPACT_PANEL_BREAKPOINT);
   const isUltraCompactPanel = useIsNarrow(ULTRA_COMPACT_PANEL_BREAKPOINT);
   const isNarrowLayout = useIsNarrow(NARROW_LAYOUT_BREAKPOINT);
+  // How many of LIBRARY_EXTRA_COLUMNS currently fit. Each wider threshold
+  // implies the narrower ones, so this is a plain cascade rather than three
+  // independent checks; the Album cutoff reuses isUltraCompactPanel.
+  const isLibraryYearColHidden = useIsNarrow(LIBRARY_YEAR_COL_BREAKPOINT);
+  const isLibraryGenreColHidden = useIsNarrow(LIBRARY_GENRE_COL_BREAKPOINT);
+  const visibleLibraryColumnCount = isUltraCompactPanel ? 0
+    : isLibraryYearColHidden ? 1
+    : isLibraryGenreColHidden ? 2
+    : 3;
+  const visibleLibraryExtraColumns = LIBRARY_EXTRA_COLUMNS.slice(0, visibleLibraryColumnCount);
   // Entering narrow mode must never leave the sidebar's overlay drawer
   // covering the whole screen by surprise — force it closed the moment the
   // breakpoint crosses.
@@ -470,16 +490,21 @@ export default function App() {
       return;
     }
 
-    const existingPaths = new Set(library.map(t => t.filePath));
-    const uniqueNew = newTracks.filter(t => !existingPaths.has(t.filePath));
-
     if (action === 'play-next') {
-      const currentIndex = currentTrack ? library.findIndex(t => t.filePath === currentTrack.filePath) : -1;
+      // Every selected track becomes "play next", whether or not it was
+      // already in the library — see queueTracksFromService above for the
+      // full reasoning (same fix, same shape, different entry point).
+      const moving = newTracks.filter(t => t.filePath !== currentTrack?.filePath);
+      const movingPaths = new Set(moving.map(t => t.filePath));
+      const rest = library.filter(t => !movingPaths.has(t.filePath));
+      const currentIndex = currentTrack ? rest.findIndex(t => t.filePath === currentTrack.filePath) : -1;
       const insertAt = currentIndex === -1 ? 0 : currentIndex + 1;
-      setLibrary([...library.slice(0, insertAt), ...uniqueNew, ...library.slice(insertAt)]);
+      setLibrary([...rest.slice(0, insertAt), ...moving, ...rest.slice(insertAt)]);
       // Most recent "Play Next" plays first, mirroring the insert-after-current order above.
-      forcedNextQueueRef.current = [...uniqueNew.map(t => t.filePath), ...forcedNextQueueRef.current];
+      forcedNextQueueRef.current = [...moving.map(t => t.filePath), ...forcedNextQueueRef.current];
     } else if (action === 'add-to-queue') {
+      const existingPaths = new Set(library.map(t => t.filePath));
+      const uniqueNew = newTracks.filter(t => !existingPaths.has(t.filePath));
       setLibrary([...library, ...uniqueNew]);
     }
   };
@@ -522,25 +547,42 @@ export default function App() {
   // Finder Services ("Add to Queue in Sonus" / "Play Next in Sonus"). Unlike a
   // double-click, these never replace the library and never change what's
   // playing — they only queue, exactly as their menu labels say. Returns how
-  // many tracks were actually added (already-present ones are skipped).
+  // many tracks were actually queued.
   const queueTracksFromService = React.useCallback((action, newTracks) => {
     const lib = libraryRef.current;
+
+    if (action === 'play-next') {
+      // Every selected track becomes "play next", whether or not it was
+      // already in the library — that's an explicit request to play this
+      // specific file next, not a request to add a row, so an existing track
+      // must not be silently dropped just because it isn't new. Its row is
+      // pulled out of its current spot and reinserted alongside any
+      // brand-new ones, right after the current track, so the visible order
+      // matches what will actually play; forcedNextQueueRef is what actually
+      // drives playback order though (see playNext()) — shuffle ignores row
+      // position entirely.
+      const ct = currentTrackRef.current;
+      // Can't move the currently-playing track to "after itself" — and
+      // there's nothing meaningful to do if you Play Next the track that's
+      // already playing, so it's excluded rather than queued.
+      const moving = newTracks.filter(t => t.filePath !== ct?.filePath);
+      const movingPaths = new Set(moving.map(t => t.filePath));
+      const rest = lib.filter(t => !movingPaths.has(t.filePath));
+      const currentIndex = ct ? rest.findIndex(t => t.filePath === ct.filePath) : -1;
+      const insertAt = currentIndex === -1 ? 0 : currentIndex + 1;
+      setLibrary([...rest.slice(0, insertAt), ...moving, ...rest.slice(insertAt)]);
+      forcedNextQueueRef.current = [...moving.map(t => t.filePath), ...forcedNextQueueRef.current];
+      return moving.length;
+    }
+
+    // Add to Queue: appending an already-present track would just duplicate
+    // its row, and unlike Play Next there's no ordering ambiguity to
+    // resolve — it's already somewhere in the queue, so skipping it is
+    // correct as-is.
     const existingPaths = new Set(lib.map(t => t.filePath));
     const uniqueNew = newTracks.filter(t => !existingPaths.has(t.filePath));
     if (uniqueNew.length === 0) return 0;
-
-    if (action === 'play-next') {
-      const ct = currentTrackRef.current;
-      const currentIndex = ct ? lib.findIndex(t => t.filePath === ct.filePath) : -1;
-      const insertAt = currentIndex === -1 ? 0 : currentIndex + 1;
-      setLibrary([...lib.slice(0, insertAt), ...uniqueNew, ...lib.slice(insertAt)]);
-      // Repositioning the rows is only the visual half: forcedNextQueueRef is
-      // what actually drives playback order, and shuffle ignores list position
-      // entirely without it.
-      forcedNextQueueRef.current = [...uniqueNew.map(t => t.filePath), ...forcedNextQueueRef.current];
-    } else {
-      setLibrary([...lib, ...uniqueNew]);
-    }
+    setLibrary([...lib, ...uniqueNew]);
     return uniqueNew.length;
   }, []);
 
@@ -1345,21 +1387,41 @@ export default function App() {
         </div>
       )}
 
-      {/* Narrow mode: hamburger lives in the draggable strip itself instead of
-          its own row below — that row used to cost 42-58px of vertical space
-          for one icon, all of it coming straight out of the track list's
-          share of the window. Right-aligned since the traffic lights always
-          occupy the left edge, so there's no collision risk. Unlike search/
-          the Home label above, this stays visible (and toggles to a close
-          icon) regardless of drawer state — it's the drawer's own open/close
-          control, not something the drawer should be able to hide. */}
-      {isNarrowLayout && !isNowPlayingOpen && (view === 'library' || view === 'home') && (
+      {/* Sidebar toggle — the same hamburger in the same drag-strip spot at
+          every window width, not just narrow. Right-aligned since the
+          traffic lights always occupy the left edge, so there's no collision
+          risk. At full width this replaces the old edge-of-sidebar pull-tab
+          entirely, and — matching that pull-tab's own behavior — stays up
+          regardless of view, including through Now Playing, since the
+          sidebar there is only ever pushed aside, never covered. Narrow mode
+          keeps its tighter gating: NP there is a full-screen takeover with no
+          sidebar to reach, so the button (and the drawer it opens) hide with
+          it, and it only lives in the draggable strip itself rather than a
+          row of its own below — that row used to cost 42-58px of vertical
+          space for one icon, all of it coming straight out of the track
+          list's share of the window. */}
+      {(!isNarrowLayout || (!isNowPlayingOpen && (view === 'library' || view === 'home'))) && (
         <button
           className="clickable player-control-button"
-          style={{ position: 'fixed', top: 2, right: 16, zIndex: 51, color: 'var(--text-primary)', padding: 10, WebkitAppRegion: 'no-drag' }}
+          title={isNarrowLayout ? undefined : (sidebarCollapsed ? 'Show sidebar (⌘\\)' : 'Hide sidebar (⌘\\)')}
+          style={{
+            position: 'fixed', top: 2, right: 16, zIndex: 51, padding: 10, WebkitAppRegion: 'no-drag',
+            // "Open" reads via icon color, the same language the rest of the
+            // app already uses for an on/selected toggle (repeat, shuffle,
+            // the active sort column, genre filter chips) — not a background
+            // fill, which read as a flat, disconnected blob here.
+            color: (!isNarrowLayout && !sidebarCollapsed) ? 'var(--accent-color)' : 'var(--text-primary)',
+          }}
           onClick={() => setSidebarCollapsed(v => !v)}
         >
-          {sidebarCollapsed ? <Menu size={18} /> : <X size={18} />}
+          {/* Narrow mode still morphs to an explicit close (X) icon — this
+              is the drawer's own open/close control there, and the drawer
+              overlays content, so a distinct "close" affordance earns its
+              keep. Full width keeps the same hamburger glyph throughout and
+              shows "open" via the accent color above instead — the sidebar
+              there only ever pushes content aside, so an X reads as more
+              alarming than useful. */}
+          {isNarrowLayout ? (sidebarCollapsed ? <Menu size={18} /> : <X size={18} />) : <Menu size={18} />}
         </button>
       )}
 
@@ -1460,21 +1522,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Sidebar toggle tab — full-width mode only; narrow mode's hamburger
-          button (in the narrow top bar, below) replaces it as the drawer
-          trigger, since a pull-tab at the content edge doesn't fit an overlay
-          drawer the same way. */}
-      {!isNarrowLayout && (
-        <button
-          className="clickable sidebar-toggle-tab"
-          title={sidebarCollapsed ? 'Show sidebar (⌘\\)' : 'Hide sidebar (⌘\\)'}
-          style={{ left: sidebarCollapsed ? 4 : 84 }}
-          onClick={() => setSidebarCollapsed(v => !v)}
-        >
-          {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-        </button>
-      )}
-
       {/* Main Content Area */}
       <div className="glass-panel" style={{ flex: 1, borderRadius: (isNarrowLayout || sidebarCollapsed) ? 16 : '16px 0 0 16px', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', transition: 'border-radius 0.25s ease' }}>
 
@@ -1497,6 +1544,7 @@ export default function App() {
               density={density}
               onDensityChange={setDensity}
               showAlbum={false}
+              extraColumns={visibleLibraryExtraColumns}
             />
           </div>
         )}
@@ -1569,6 +1617,7 @@ export default function App() {
                   scrollElRef={scrollContainerRef}
                   virtualizerRef={rowVirtualizerRef}
                   showAlbum={false}
+                  extraColumns={visibleLibraryExtraColumns}
                 />
               )}
             </div>
@@ -1807,7 +1856,7 @@ export default function App() {
                         onMouseUp={handleSeekMouseUp}
                         onTouchStart={handleSeekMouseDown}
                         onTouchEnd={handleSeekMouseUp}
-                        className="clickable top-progress-bar top-progress-bar--hovered wow-slider"
+                        className="clickable top-progress-bar top-progress-bar--hovered top-progress-bar--narrow wow-slider"
                         style={{ '--progress': `${duration ? ((isSeeking ? seekValue : currentTime) / duration) * 100 : 0}%` }}
                       />
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
@@ -1826,14 +1875,37 @@ export default function App() {
               </div>
             ) : (
             <>
+            {/* Glass-pill back button — same chip language as .glass-button /
+                the genre filter chips, rather than bare text+icon floating
+                directly on the (often bright, always variable) artwork glow
+                behind it. The label is real navigational info, not
+                decoration — it names the specific screen "back" returns to
+                (Library, Home, or a Home detail page like an artist/album),
+                so it stays, just legible now. */}
             <button
-              className="player-control-button clickable"
-              style={{ position: 'absolute', top: 16, left: 16, zIndex: 2, display: 'flex', alignItems: 'center', gap: 4, color: 'rgba(255,255,255,0.65)', fontSize: 13, fontWeight: 600, maxWidth: 'calc(50% - 32px)' }}
+              className="np-back-button clickable"
+              style={{ position: 'absolute', top: 16, left: 16, zIndex: 2, maxWidth: 'calc(50% - 32px)' }}
               onClick={(e) => { e.stopPropagation(); collapseNowPlaying(); }}
             >
               <ChevronLeft size={18} style={{ flexShrink: 0 }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{npBackLabel}</span>
             </button>
+            {/* Lyrics toggle — same top row and centering as the narrow
+                view's Song/Lyrics tabs: top:16 matches the back button's own
+                row, centered independently of it rather than living inside
+                the artwork column, so it stays put regardless of that
+                column's width. Same lyrics glyph as the track list's row
+                indicator (Mic2), not text — white when open, dimmed when
+                closed, same as before. */}
+            {(currentTrack?.lyrics || isLyricsOpen) && (
+              <button
+                className="lyrics-open-btn clickable"
+                style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 2, color: isLyricsOpen ? '#fff' : 'rgba(255,255,255,0.4)' }}
+                onClick={(e) => { e.stopPropagation(); setIsLyricsOpen(v => !v); }}
+              >
+                <Mic2 size={20} />
+              </button>
+            )}
             <div style={{
               position: 'relative', display: 'flex',
               flexDirection: 'row',
@@ -1895,15 +1967,6 @@ export default function App() {
                         )}
                       </div>
                     </div>
-                    {/* Lyrics toggle — › to open (glow hint), ‹ to close (no glow) */}
-                    {(currentTrack.lyrics || isLyricsOpen) && (
-                      <button
-                        className={cx('lyrics-open-btn clickable', { 'lyrics-open-btn--open': isLyricsOpen })}
-                        onClick={(e) => { e.stopPropagation(); setIsLyricsOpen(v => !v); }}
-                      >
-                        {isLyricsOpen ? <ChevronLeft size={22} /> : <ChevronRight size={22} />}
-                      </button>
-                    )}
                   </div>
                   {/* Lyrics panel — outer: transitions width */}
                   <div style={{

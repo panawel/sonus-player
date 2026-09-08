@@ -255,37 +255,6 @@ input[type="range"].volume-slider:hover::-webkit-slider-thumb {
   border-radius: 50%;
 }
 
-/* Sidebar collapse toggle: a thin tab sitting right at the sidebar/content
-   boundary. Positioned absolutely against .app-container; only `left`
-   (the collapsed/expanded endpoint) is set inline, in App.jsx. */
-.sidebar-toggle-tab {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  transition: left 0.25s ease, background 0.15s ease;
-  z-index: 20;
-  width: 16px;
-  height: 40px;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: var(--glass-bg);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  outline: none;
-}
-.sidebar-toggle-tab:hover {
-  background: var(--glass-highlight);
-  color: var(--text-primary);
-}
-.sidebar-toggle-tab:active {
-  background: var(--glass-active);
-  transform: translateY(-50%) scale(0.92);
-}
-
 /* Narrow-mode sidebar drawer (App.jsx's isNarrowLayout): the sidebar becomes a
    fixed overlay instead of pushing content, sliding in over it rather than
    beside it. Width/padding/transition stay inline (unchanged from the
@@ -536,6 +505,20 @@ input[type="range"].top-progress-bar--hovered::-webkit-slider-thumb {
   transform: scale(1.3);
 }
 
+/* Narrow Now Playing's seek bar: same thin drawn track as the desktop top
+   strip above, but a much bigger invisible clickable/tap box — it's a
+   full-width standalone bar driven mainly by touch (onTouchStart/onTouchEnd
+   in App.jsx), unlike the desktop strip it borrows its look from, which only
+   needs a small hit area since a mouse can hover to reveal it first. The
+   negative margin keeps the input's net contribution to the flow at the
+   original ~4px, so surrounding layout doesn't shift — it just grows the
+   box symmetrically around the same visual centerline, eating into existing
+   whitespace above/below rather than adding any. */
+input[type="range"].top-progress-bar--narrow {
+  height: 20px;
+  margin: -10px 0 -6px;
+}
+
 /* Now Playing: scrolls text that doesn't fit its box, back and forth, pausing at each end.
    Both ends of the cycle land on translateX(0), so looping is seamless — no snap-back jump. */
 @keyframes marquee-scroll {
@@ -659,43 +642,51 @@ input[type="range"].top-progress-bar--hovered::-webkit-slider-thumb {
   100% { transform: translate(0,    0)    scale(1);    }
 }
 
-/* Now Playing: › open chevron (right edge of left column) */
+/* Now Playing: lyrics toggle, centered in the top row — the same Mic2 glyph
+   as the track list's row indicator, not text. Position and color (white
+   when open, dimmed when closed) are set inline in App.jsx, so this only
+   carries the button chrome; no hover treatment, matching the narrow view's
+   Song/Lyrics tabs this mirrors. */
 .lyrics-open-btn {
-  position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
   background: transparent;
   border: none;
   padding: 8px;
-  color: rgba(255, 255, 255, 0.8);
-  cursor: pointer;
-  outline: none;
-  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.2s ease, background 0.2s ease;
-  animation: lyrics-btn-glow 3s ease-in-out infinite;
-}
-.lyrics-open-btn:hover {
-  color: rgba(255, 255, 255, 1);
-  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  outline: none;
+  border-radius: 6px;
+  transition: color 0.2s ease;
 }
 
-/* Close state: glow stops — hint done, now it's a control */
-.lyrics-open-btn--open {
-  animation: none;
+/* Now Playing: back button, top-left — a real glass pill (same chip
+   language as .glass-button / the genre filter chips) instead of bare
+   icon+text floating directly on the artwork glow behind it, which is
+   variable enough in color/brightness to make plain text hard to read. */
+.np-back-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px 7px 10px;
+  border-radius: 20px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px);
   color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
 }
-.lyrics-open-btn--open:hover {
-  color: rgba(255, 255, 255, 1);
-  background: rgba(255, 255, 255, 0.08);
+.np-back-button:hover {
+  background: var(--glass-highlight);
+  color: #fff;
 }
-
-@keyframes lyrics-btn-glow {
-  0%, 100% { filter: drop-shadow(0 0 0px rgba(0, 242, 254, 0)); }
-  50%       { filter: drop-shadow(0 0 6px rgba(0, 242, 254, 0.55)); }
+.np-back-button:active {
+  background: var(--glass-active);
+  transform: scale(0.97);
 }
 
 /* ─── Home screen ─────────────────────────────────────────────────── */

@@ -3,7 +3,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Music, MoreVertical, Play, Pause, Mic2 } from 'lucide-react';
 import cx from 'classnames';
-import { formatTime, ROW_HEIGHTS, ART_SIZES } from './trackUtils.js';
+import { formatTime, displayValueForColumn, ROW_HEIGHTS, ART_SIZES } from './trackUtils.js';
 
 const TITLE_SIZE = { compact: 13, comfortable: 14 };
 const SUB_SIZE = { compact: 11, comfortable: 12 };
@@ -28,6 +28,25 @@ function StackedCell({ top, bottom, flip, density, flexGrow }) {
   );
 }
 
+// One Library-only extra column cell (Album/Bitrate/Year/Genre) — a single
+// line, unlike StackedCell's two, and secondary-weight throughout since these
+// are supplementary metadata, not the row's identity like Title.
+function FlatCell({ value, flex, width, align, density, className, marginLeft }) {
+  return (
+    <div className={className} style={{
+      ...(width ? { width, flexShrink: 0 } : { flex: `${flex} 1 0px`, minWidth: 0 }),
+      ...(marginLeft ? { marginLeft } : {}),
+      textAlign: align === 'right' ? 'right' : 'left',
+      fontSize: SUB_SIZE[density] + 1,
+      color: 'var(--text-secondary)',
+      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      fontVariantNumeric: align === 'right' ? 'tabular-nums' : undefined,
+    }}>
+      {value || <span style={{ opacity: 0.35 }}>—</span>}
+    </div>
+  );
+}
+
 function TrackRowImpl({
   track, index,
   isCurrent, isPlaying, isSelected,
@@ -36,11 +55,18 @@ function TrackRowImpl({
   leading = 'index',            // 'handle' | 'index'
   sortable = null,              // { setNodeRef, style, handleProps, isDragging } in drag mode
   showAlbum = true,
+  // Library-only extended layout switch. null (default, every other caller)
+  // keeps the classic lyrics + combined Duration/⋮ crossfade slot. Passing an
+  // array (LIBRARY_EXTRA_COLUMNS slice, even an empty one at narrow widths)
+  // switches to: lyrics, Duration, the extra columns, then a standalone ⋮
+  // button pinned at the far right — see trackUtils.js.
+  extraColumns = null,
   onRowClick, onRowDoubleClick, onPlayToggle, onRowMenu, onRowContextMenu,
 }) {
   const [hovered, setHovered] = useState(false);
   const art = ART_SIZES[density];
   const showOverlay = (isCurrent && isPlaying) || hovered;
+  const extended = extraColumns !== null;
 
   return (
     <div
@@ -124,31 +150,63 @@ function TrackRowImpl({
         {track.lyrics && <Mic2 size={12} color="var(--text-secondary)" />}
       </div>
 
-      {/* Duration ⇄ menu button — both mounted, crossfaded, zero layout shift */}
-      <div style={{ width: 52, flexShrink: 0, position: 'relative', height: '100%' }}>
-        <span style={{
-          position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
-          fontSize: SUB_SIZE[density] + 1, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums',
-          opacity: hovered ? 0 : 1, transition: 'opacity 0.12s ease', pointerEvents: 'none',
-        }}>
-          {formatTime(track.duration)}
-        </span>
-        <button
-          className="clickable track-menu-btn"
-          tabIndex={-1}
-          style={{
-            position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
-            background: 'transparent', border: 'none', padding: 4, cursor: 'pointer',
-            color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4,
-            opacity: hovered ? 1 : 0, transition: 'opacity 0.12s ease',
-            pointerEvents: hovered ? 'auto' : 'none',
-          }}
-          onClick={(e) => { e.stopPropagation(); onRowMenu?.(track, index, e.currentTarget.getBoundingClientRect()); }}
-          onDoubleClick={(e) => e.stopPropagation()}
-        >
-          <MoreVertical size={15} />
-        </button>
-      </div>
+      {extended ? (
+        <>
+          {/* Duration is its own column now that ⋮ no longer shares its slot. */}
+          <FlatCell className="track-row-duration" value={formatTime(track.duration)} width={52} align="right" density={density} />
+
+          {/* Library-only extra columns (Album/Bitrate/Year/Genre). The first
+              one (Album) gets a little breathing room after the right-aligned
+              Duration number, which otherwise reads as crowded against it. */}
+          {extraColumns.map((col, i) => (
+            <FlatCell key={col.id} value={displayValueForColumn(track, col.id)} flex={col.flex} width={col.width} align={col.align} density={density} marginLeft={i === 0 ? 20 : 0} />
+          ))}
+
+          {/* Row menu — pinned at the far right, hover-only, independent of Duration. */}
+          <div style={{ width: 28, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <button
+              className="clickable track-menu-btn"
+              tabIndex={-1}
+              style={{
+                background: 'transparent', border: 'none', padding: 4, cursor: 'pointer',
+                color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4,
+                opacity: hovered ? 1 : 0, transition: 'opacity 0.12s ease',
+                pointerEvents: hovered ? 'auto' : 'none',
+              }}
+              onClick={(e) => { e.stopPropagation(); onRowMenu?.(track, index, e.currentTarget.getBoundingClientRect()); }}
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              <MoreVertical size={15} />
+            </button>
+          </div>
+        </>
+      ) : (
+        /* Duration ⇄ menu button — both mounted, crossfaded, zero layout shift */
+        <div style={{ width: 52, flexShrink: 0, position: 'relative', height: '100%' }}>
+          <span style={{
+            position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+            fontSize: SUB_SIZE[density] + 1, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums',
+            opacity: hovered ? 0 : 1, transition: 'opacity 0.12s ease', pointerEvents: 'none',
+          }}>
+            {formatTime(track.duration)}
+          </span>
+          <button
+            className="clickable track-menu-btn"
+            tabIndex={-1}
+            style={{
+              position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
+              background: 'transparent', border: 'none', padding: 4, cursor: 'pointer',
+              color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4,
+              opacity: hovered ? 1 : 0, transition: 'opacity 0.12s ease',
+              pointerEvents: hovered ? 'auto' : 'none',
+            }}
+            onClick={(e) => { e.stopPropagation(); onRowMenu?.(track, index, e.currentTarget.getBoundingClientRect()); }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <MoreVertical size={15} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

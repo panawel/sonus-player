@@ -348,10 +348,13 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         const labels = () => [...document.querySelectorAll('.track-header-label')];
         out.titleLabelX = Math.round(labels()[0].getBoundingClientRect().left);
         out.rowTitleX   = Math.round(firstRow.children[2].getBoundingClientRect().left);
-        const timeLabel = labels()[labels().length - 1];
+        // Selected by label/class rather than position: Library's Duration
+        // column no longer sits last now that ⋮ is a standalone trailing
+        // slot and Album/Bitrate/Year/Genre can follow it.
+        const timeLabel = labels().find(l => l.textContent.trim() === 'Time');
         out.timeLabelRight = Math.round(timeLabel.getBoundingClientRect().right);
         out.rowTimeRight   = Math.round(
-          firstRow.children[firstRow.children.length - 1].getBoundingClientRect().right
+          firstRow.querySelector('.track-row-duration').getBoundingClientRect().right
         );
 
         // Rows must be evenly pitched — a constant-offset scrollMargin error
@@ -977,6 +980,29 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       `window.__sonusTest.getLibrary().length`, true
     );
     check(dupState === 4, `duplicate Services add is a no-op (${dupState})`);
+
+    // 10. Unlike Add to Queue, Play Next on a track already in the library is
+    // NOT a no-op — it's an explicit "play this specific file next" request,
+    // so the track's row must move to right after the current one instead of
+    // being silently dropped just because it isn't a new row. Regression
+    // guard: this used to dedupe before deciding what to queue, so an
+    // already-present track never reached forcedNextQueueRef at all.
+    mainWindow.webContents.send('open-external-file', { tracks: multi.tracks, failedCount: 0 });
+    await sleep(400);
+    await fs.writeFile(path.join(udir, SERVICE_FLAG), 'add-to-queue');
+    seedOpenFileBatch([copyD]);
+    await loadLibraryState();
+    await sleep(700);
+    await fs.writeFile(path.join(udir, SERVICE_FLAG), 'play-next');
+    seedOpenFileBatch([copyD]);
+    await loadLibraryState();
+    await sleep(700);
+    const movedState = await mainWindow.webContents.executeJavaScript(
+      `window.__sonusTest.getLibrary().map(t => t.filePath)`, true
+    );
+    check(movedState.length === 4, `play-next on an existing track adds no duplicate row (${movedState.length})`);
+    check(movedState[1] === copyD, `play-next moves an already-present track to right after the current one (index ${movedState.indexOf(copyD)})`);
+    check(movedState[0] === copyA, 'play-next on an existing track leaves the current track in place');
 
     await mainWindow.webContents.executeJavaScript(`window.__sonusTest.setView('library'); window.__sonusTest.setLibrary([]);`, true);
     await sleep(150);

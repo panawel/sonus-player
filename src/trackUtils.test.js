@@ -34,9 +34,18 @@ describe('getSortValue', () => {
     expect(getSortValue(t({ duration: null }), 'duration')).toBeNull();
   });
   it('returns null for fields that are no longer sortable', () => {
-    for (const gone of ['year', 'dateAdded', 'playCount', 'lastPlayed']) {
-      expect(getSortValue(t({ year: 1999, dateAdded: 5, playCount: 3, lastPlayed: 7 }), gone)).toBeNull();
+    for (const gone of ['dateAdded', 'playCount', 'lastPlayed', 'bitrate']) {
+      expect(getSortValue(t({ dateAdded: 5, playCount: 3, lastPlayed: 7, bitrate: 320 }), gone)).toBeNull();
     }
+  });
+  it('parses year, rejecting non-numeric and zero', () => {
+    expect(getSortValue(t({ year: '1999' }), 'year')).toBe(1999);
+    expect(getSortValue(t({ year: '' }), 'year')).toBeNull();
+    expect(getSortValue(t({ year: 0 }), 'year')).toBeNull();
+  });
+  it('reads genre, lowercasing and keeping only the first of a multi-genre tag', () => {
+    expect(getSortValue(t({ genre: 'Rock, Pop' }), 'genre')).toBe('rock');
+    expect(getSortValue(t({ genre: '' }), 'genre')).toBeNull();
   });
 });
 
@@ -83,7 +92,7 @@ describe('sortTracks', () => {
 
 describe('SORT_FIELDS', () => {
   it('exposes only fields a column header can actually reach', () => {
-    expect(SORT_FIELDS.map(f => f.id)).toEqual(['title', 'artist', 'album', 'duration']);
+    expect(SORT_FIELDS.map(f => f.id)).toEqual(['title', 'artist', 'album', 'duration', 'year', 'genre']);
     expect(sortFieldById('title')).toBeTruthy();
     expect(sortFieldById('playCount')).toBeNull();
     expect(sortFieldById('bogus')).toBeNull();
@@ -118,6 +127,11 @@ describe('nextInCycle', () => {
   it('walks Time and Album: own field ↑↓ → manual → loop', () => {
     expect(walk('duration', 4)).toEqual(['duration:asc', 'duration:desc', 'manual:-', 'duration:asc']);
     expect(walk('album', 4)).toEqual(['album:asc', 'album:desc', 'manual:-', 'album:asc']);
+  });
+
+  it('walks Year and Genre: own field ↑↓ → manual → loop', () => {
+    expect(walk('year', 4)).toEqual(['year:asc', 'year:desc', 'manual:-', 'year:asc']);
+    expect(walk('genre', 4)).toEqual(['genre:asc', 'genre:desc', 'manual:-', 'genre:asc']);
   });
 
   it('clicking a different column restarts that column from the top', () => {

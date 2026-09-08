@@ -35,6 +35,7 @@ export default function TrackList({
   scrollElRef,                // ref to the actual scrolling ancestor
   virtualizerRef = null,      // exposes the virtualizer (scrollToTrack etc.)
   showAlbum = true,
+  extraColumns = null,          // Library-only: LIBRARY_EXTRA_COLUMNS slice, see trackUtils.js / TrackRow.jsx
   initialOffset = 0,          // restored scroll position (Details view)
   emptyState = null,          // replaces the default "No tracks found." block
 }) {
@@ -177,6 +178,7 @@ export default function TrackList({
       sortField: sort.field,
       leading,
       showAlbum,
+      extraColumns,
       onRowClick: selection.handleRowClick,
       onRowDoubleClick: handleRowDoubleClick,
       onPlayToggle: handlePlayToggle,

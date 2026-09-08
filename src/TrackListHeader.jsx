@@ -42,7 +42,13 @@ export default function TrackListHeader({
   sort, onCycleColumn,
   density, onDensityChange,
   showAlbum = true,
+  // Library-only extended layout switch — see the matching prop on TrackRow
+  // (TrackRow.jsx) for the full explanation. null keeps today's header
+  // exactly as-is; an array appends extra column labels after Time and adds
+  // a trailing spacer matching the row's standalone ⋮ button slot.
+  extraColumns = null,
 }) {
+  const extended = extraColumns !== null;
   return (
     <div className="track-list-header" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
       {/* Leading spacer stands in for the row's index + artwork cells, so every
@@ -65,6 +71,23 @@ export default function TrackListHeader({
         </button>
       </div>
       <HeaderZone columnId="duration" fallbackLabel="Time" sort={sort} onCycleColumn={onCycleColumn} style={{ width: 52, flexShrink: 0, justifyContent: 'flex-end' }} />
+      {extended && extraColumns.map((col, i) => (
+        <HeaderZone
+          key={col.id}
+          columnId={col.id}
+          fallbackLabel={col.label}
+          sort={sort}
+          onCycleColumn={onCycleColumn}
+          style={{
+            ...(col.width ? { width: col.width, flexShrink: 0 } : { flex: `${col.flex} 1 0px`, minWidth: 0 }),
+            ...(col.align === 'right' ? { justifyContent: 'flex-end' } : {}),
+            ...(i === 0 ? { marginLeft: 20 } : {}),
+          }}
+        />
+      ))}
+      {/* Matches the row's standalone ⋮ button slot, which the header has no
+          label for — keeps flexible columns (Title, Album, Genre) aligned. */}
+      {extended && <div style={{ width: 28, flexShrink: 0 }} />}
     </div>
   );
 }

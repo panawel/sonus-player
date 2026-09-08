@@ -24,6 +24,8 @@ export const SORT_FIELDS = [
   { id: 'artist',   label: 'Artist'   },
   { id: 'album',    label: 'Album'    },
   { id: 'duration', label: 'Duration' },
+  { id: 'year',     label: 'Year'     },
+  { id: 'genre',    label: 'Genre'    },
 ];
 
 export const sortFieldById = (id) => SORT_FIELDS.find(f => f.id === id) ?? null;
@@ -54,7 +56,41 @@ export const COLUMN_CYCLES = {
     { field: 'duration', dir: 'desc' },
     MANUAL_SORT,
   ],
+  year: [
+    { field: 'year', dir: 'asc'  },
+    { field: 'year', dir: 'desc' },
+    MANUAL_SORT,
+  ],
+  genre: [
+    { field: 'genre', dir: 'asc'  },
+    { field: 'genre', dir: 'desc' },
+    MANUAL_SORT,
+  ],
 };
+
+// Library-only extra columns, inserted between Title and the lyrics/Duration
+// cluster. Order here is both the left-to-right render order and the
+// right-to-left hide order as the window narrows (App.jsx slices this array
+// from the front as width shrinks, so the last entry — Genre — is the first
+// to go).
+export const LIBRARY_EXTRA_COLUMNS = [
+  { id: 'album', label: 'Album', flex: 1 },
+  { id: 'year',  label: 'Year',  width: 50, align: 'right' },
+  { id: 'genre', label: 'Genre', flex: 0.8 },
+];
+
+// Row-display text for a LIBRARY_EXTRA_COLUMNS cell. Deliberately separate
+// from getSortValue: display keeps original casing and shows only the first
+// genre of a multi-genre tag, while the sort value is lowercased for
+// case-insensitive ordering.
+export function displayValueForColumn(track, columnId) {
+  switch (columnId) {
+    case 'album':   return track.album || '';
+    case 'year':    return track.year ? String(track.year) : '';
+    case 'genre':   return track.genre ? track.genre.split(',')[0].trim() : '';
+    default: return '';
+  }
+}
 
 // The next state for a column, given the current sort. A sort that isn't in
 // this column's cycle isn't found, so the -1 wraps to index 0 — which is
@@ -75,7 +111,7 @@ export function activeFieldForColumn(columnId, sort) {
   return COLUMN_CYCLES[columnId]?.some(s => s.field === sort.field) ? sort.field : null;
 }
 
-const STRING_FIELDS = new Set(['title', 'artist', 'album']);
+const STRING_FIELDS = new Set(['title', 'artist', 'album', 'genre']);
 
 // null → "no value, always sorts last regardless of direction"
 export function getSortValue(track, field) {
@@ -84,6 +120,14 @@ export function getSortValue(track, field) {
     case 'artist': return track.artist ? String(track.artist).toLowerCase() : null;
     case 'album':  return track.album  ? String(track.album).toLowerCase()  : null;
     case 'duration': return typeof track.duration === 'number' && track.duration > 0 ? track.duration : null;
+    case 'year': {
+      const y = parseInt(track.year, 10);
+      return !isNaN(y) && y > 0 ? y : null;
+    }
+    case 'genre': {
+      const g = track.genre ? String(track.genre).split(',')[0].trim().toLowerCase() : '';
+      return g || null;
+    }
     default: return null;
   }
 }
