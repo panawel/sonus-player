@@ -25,10 +25,12 @@
   --glass-active: rgba(255, 255, 255, 0.25);
   --text-primary: rgba(255, 255, 255, 0.95);
   --text-secondary: rgba(255, 255, 255, 0.55);
-  /* Player panel / mini-player / Now Playing chrome only (both widths) — the
-     track list, Home, sidebar and detail pages keep --text-primary/secondary.
-     Deliberately brighter than those: this text sits on artwork glow and
-     blurred backdrops, where 0.95/0.55 read as gray. One place to tune. */
+  /* Player panel / mini-player / Now Playing chrome, plus the primary nav
+     pill (App.jsx's .nav-pill — both float over the same blurred title-strip
+     backdrop) — the track list, Home and detail pages keep
+     --text-primary/secondary. Deliberately brighter than those: this text
+     sits on artwork glow and blurred backdrops, where 0.95/0.55 read as
+     gray. One place to tune. */
   --chrome-text: #fff;
   --chrome-text-dim: rgba(255, 255, 255, 0.85);
   --accent-color: #0A84FF;
@@ -261,41 +263,112 @@ input[type="range"].volume-slider:hover::-webkit-slider-thumb {
   border-radius: 50%;
 }
 
-/* Narrow-mode sidebar drawer (App.jsx's isNarrowLayout): the sidebar becomes a
-   fixed overlay instead of pushing content, sliding in over it rather than
-   beside it. Width/padding/transition stay inline (unchanged from the
-   persistent-column mode) so the open/close animation is identical either
-   way — this only adds positioning, background and elevation. */
-.sidebar-drawer {
-  position: fixed;
-  top: 42px;
-  bottom: 0;
-  left: 0;
-  z-index: 30;
-  background: rgba(20, 20, 24, 0.92);
-  backdrop-filter: blur(24px);
-  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.45);
+/* Primary nav pill (App.jsx) — replaces the old collapsible sidebar/drawer.
+   Search/Add/Library/Home grouped into one glass segmented control living in
+   the draggable title strip. Container matches .glass-button's own material
+   (same bg/border tokens) so it reads as part of the same design language.
+   Deliberately compact/chip-sized (26px button row) rather than a bulkier
+   toolbar control — sized down after an initial pass read as too tall. */
+.nav-pill {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 15px;
+  padding: 2px;
+  backdrop-filter: blur(20px);
+}
+.nav-pill-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--chrome-text-dim);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.nav-pill-btn:hover {
+  background: var(--glass-highlight);
+  color: var(--chrome-text);
+}
+.nav-pill-btn:active {
+  transform: scale(0.94);
+}
+/* Active view — the persistent, stronger-than-hover background is the whole
+   signal; text stays the same bright neutral as hover rather than switching
+   to --accent-color, which read as an odd, disconnected flash of color in an
+   otherwise monochrome control. Same reasoning as the toggle language used
+   elsewhere (repeat/shuffle, sort columns) but deliberately not reusing that
+   exact blue-icon treatment here — a user-confirmed departure. */
+.nav-pill-btn.active {
+  background: var(--glass-active);
+  color: var(--chrome-text);
 }
 
-/* Narrow drawer nav rows (App.jsx) — active-state background is set inline
-   (so it can compare against `view`); hover needs !important to win over
-   that inline background, same pattern as .track-menu-btn below. */
-.narrow-drawer-item {
-  transition: background 0.15s ease;
+/* Search segment — a 4th pill member that swaps between a plain icon button
+   (collapsed) and an inline text input (expanded), animating only `width`
+   since it's the one flex child whose intrinsic width actually changes; the
+   pill container needs no width logic of its own; growing this segment
+   naturally pushes the pill's fixed-right-edge left. No separate background
+   or border on the input — it sits inside the pill's own glass surface
+   rather than nesting a second pill-within-a-pill. */
+.nav-pill-search {
+  position: relative;
+  height: 26px;
+  border-radius: 13px;
+  overflow: hidden;
+  transition: width 0.2s ease;
+  flex-shrink: 0;
 }
-.narrow-drawer-item:hover {
-  background: var(--glass-highlight) !important;
+.nav-pill-search .nav-pill-btn {
+  width: 100%;
+  padding: 0;
 }
-
-.sidebar-drawer-backdrop {
-  position: fixed;
-  top: 42px;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 29;
-  animation: confirm-modal-backdrop-in 0.18s ease-out;
+.nav-pill-search-icon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--chrome-text-dim);
+  pointer-events: none;
+}
+.nav-pill-search-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--chrome-text);
+  font-size: 11.5px;
+}
+.nav-pill-search-input::placeholder {
+  color: var(--chrome-text-dim);
+}
+.nav-pill-search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 3px;
+  border-radius: 50%;
+  display: flex;
+  cursor: pointer;
+  color: var(--chrome-text-dim);
+}
+.nav-pill-search-clear:hover {
+  color: var(--chrome-text);
+  background: var(--glass-highlight);
 }
 
 /* Confirm modal (Play / Play Next / Add to Queue / Cancel): floats over the
@@ -441,23 +514,6 @@ input[type="range"]:hover::-webkit-slider-thumb,
 input[type="range"]:active::-webkit-slider-thumb {
   opacity: 1;
   transform: scale(1.2);
-}
-
-/* Library search (title-bar strip): idle state keeps the same plain neutral border as every
-   other glass input in the app, plus a soft elevation shadow so it doesn't read as a stray
-   box floating disconnected from anything. Focus intensifies into a full glow ring using the
-   app's signature wow-slider gradient (#00f2fe -> #4facfe). */
-.wow-search-input {
-  border-color: var(--glass-border);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  transition: box-shadow 0.25s ease, border-color 0.25s ease;
-}
-.wow-search-input::placeholder {
-  color: rgba(255, 255, 255, 0.65);
-}
-.wow-search-input:focus {
-  border-color: #4facfe;
-  box-shadow: 0 0 0 1.5px #00f2fe, 0 0 18px 3px rgba(79, 172, 254, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 /* Play/Pause long-press (0.7s) ring: only mounts after a 250ms delay (App.jsx), so this

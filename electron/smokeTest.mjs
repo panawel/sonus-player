@@ -480,7 +480,11 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         out.sortChipGone = !document.querySelector('.track-header-sort-chip');
 
         // A search matching nothing must KEEP the bar (count + sort controls).
-        const input = document.querySelector('.wow-search-input');
+        // The search field is now a nav-pill segment that only mounts once
+        // opened — click its collapsed toggle button first.
+        document.querySelector('.nav-pill-search-toggle')?.click();
+        await sleep(300);
+        const input = document.querySelector('.nav-pill-search-input');
         const nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
         nativeSet.call(input, 'zzz-no-such-track-zzz');
         input.dispatchEvent(new Event('input', { bubbles: true }));

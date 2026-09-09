@@ -1,5 +1,5 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, ChevronDown, MoreVertical, Menu, Search, X, Volume2, Volume1, VolumeX, Home, Mic2 } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, ChevronDown, MoreVertical, Plus, Search, X, Volume2, Volume1, VolumeX, Home, Mic2 } from 'lucide-react';
 import { FastAverageColor } from 'fast-average-color';
 import { arrayMove } from '@dnd-kit/sortable';
 import TrackList from './TrackList.jsx';
@@ -29,19 +29,15 @@ const COMPACT_PANEL_BREAKPOINT = 900;
 // (Imported from trackUtils.js, not defined here — HomeDetailView.jsx reuses
 // the exact same value for its own extra-columns cascade, see below.)
 // Below this, the whole app shell restructures into a single-column,
-// phone-portrait layout: the sidebar becomes an overlay drawer, the player
-// panel collapses to a mini bar (artwork + title/artist + Play only), and Now
-// Playing switches from its side-by-side Song/Lyrics split to a single
-// full-screen tab view. A strict subset of ULTRA_COMPACT_PANEL_BREAKPOINT, so
+// phone-portrait layout: the nav pill (Home/Library/Add) drops to icon-only,
+// the player panel collapses to a mini bar (artwork + title/artist + Play
+// only), and Now Playing switches from its side-by-side Song/Lyrics split to
+// a single full-screen tab view. A strict subset of ULTRA_COMPACT_PANEL_BREAKPOINT, so
 // the icon-shrink tiers above still apply unchanged in the 560-900px range —
 // this tier is checked first and branches to different JSX entirely.
 const NARROW_LAYOUT_BREAKPOINT = 560;
 // Mini-player bar height in narrow mode (vs. the full panel's 124).
 const NARROW_PLAYER_PANEL_HEIGHT = 72;
-// Narrow drawer width — wide enough for icon+label rows (vs. the 88px
-// icon-only rail at full width, which only reads well as a slim persistent
-// column, not a drawer people expect to scan text in).
-const NARROW_DRAWER_WIDTH = 240;
 
 // Library's extra columns (Album/Year/Genre) drop off one at a time, right to
 // left, as the window narrows. Breakpoints/rationale live in trackUtils.js
@@ -84,6 +80,13 @@ export default function App() {
   const [hoverTime, setHoverTime] = useState(null);
   const [pendingNewTracks, setPendingNewTracks] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // Nav-pill search segment's open/closed state — see the auto-close effect
+  // near the pill's JSX for the full close-timing logic (hover + empty query,
+  // with a short grace period).
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef(null);
+  const searchHoveredRef = useRef(false);
+  const searchCloseTimerRef = useRef(null);
   // Row density shared by every tracklist (persisted).
   const [density, setDensityState] = useState(() => {
     try { return localStorage.getItem('sonus.trackDensity') === 'comfortable' ? 'comfortable' : 'compact'; } catch { return 'compact'; }
@@ -91,24 +94,6 @@ export default function App() {
   const setDensity = React.useCallback((d) => {
     setDensityState(d);
     try { localStorage.setItem('sonus.trackDensity', d); } catch { /* ignore */ }
-  }, []);
-  // Sidebar collapse (persisted). Accepts either a value or an updater
-  // function (matching useState's own API) so both the toggle tab and the
-  // ⌘\ keyboard shortcut can flip it without needing the current value in scope.
-  const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => {
-    // A cold launch that starts out narrow must never show the drawer open
-    // for even one frame — check the width directly here (synchronous, before
-    // first paint) rather than relying on the isNarrowLayout effect below,
-    // which only corrects it a frame later and would otherwise flash open.
-    if (window.innerWidth <= NARROW_LAYOUT_BREAKPOINT) return true;
-    try { return localStorage.getItem('sonus.sidebarCollapsed') === 'true'; } catch { return false; }
-  });
-  const setSidebarCollapsed = React.useCallback((updater) => {
-    setSidebarCollapsedState(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      try { localStorage.setItem('sonus.sidebarCollapsed', String(next)); } catch { /* ignore */ }
-      return next;
-    });
   }, []);
   // Library sort (persisted across sessions). sortedLibrary is the *displayed*
   // order — playback next/prev walks it, so "next" always matches what you see.
@@ -187,12 +172,6 @@ export default function App() {
   const visibleLibraryExtraColumns = LIBRARY_EXTRA_COLUMNS.slice(
     0, extraColumnFitCount(isUltraCompactPanel, isLibraryYearColHidden, isLibraryGenreColHidden)
   );
-  // Entering narrow mode must never leave the sidebar's overlay drawer
-  // covering the whole screen by surprise — force it closed the moment the
-  // breakpoint crosses.
-  React.useEffect(() => {
-    if (isNarrowLayout) setSidebarCollapsed(true);
-  }, [isNarrowLayout, setSidebarCollapsed]);
   // Center the block within the true gap between the two clusters (not the
   // whole row — they're rarely equal width, so naive 50% centering drifts
   // into whichever side is wider), and cap its width to whatever's actually
@@ -756,22 +735,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleSeekKeyDown);
   }, []);
 
-  // ⌘\ toggles the sidebar — standard macOS "toggle sidebar" convention
-  // (Xcode, Mail). No Electron role/default binding claims this accelerator,
-  // so unlike Cmd+A this needs no menu/IPC round-trip - a plain renderer
-  // keydown listener is enough, same as the seek shortcut above.
-  React.useEffect(() => {
-    const onKeyDown = (e) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key !== '\\') return;
-      const active = document.activeElement;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-      e.preventDefault();
-      setSidebarCollapsed(v => !v);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setSidebarCollapsed]);
-
   React.useEffect(() => {
     if (window.electronAPI?.onSelectAll) {
       const unsubscribe = window.electronAPI.onSelectAll(() => {
@@ -1025,42 +988,6 @@ export default function App() {
       </div>
     );
   };
-
-  // Shared "pill" search field — used by both the full-width floating search
-  // and the narrow top bar's search box, parameterized only by size, so the
-  // two contexts share one definition of what the field looks like rather
-  // than two hand-tuned copies that can drift apart from each other.
-  const renderSearchField = ({ width, height, fontSize }) => (
-    <div style={{ position: 'relative', width, flexShrink: 0 }}>
-      <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
-      <input
-        type="text"
-        className="wow-search-input"
-        placeholder="Search..."
-        value={searchQuery}
-        onChange={e => setSearchQuery(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Escape') setSearchQuery(''); }}
-        style={{
-          width: '100%', height, borderRadius: height / 2,
-          // Only reserves room for the clear button while there's actually a
-          // query to clear — at rest the text area gets the full width back.
-          padding: searchQuery ? '0 32px 0 34px' : '0 14px 0 34px',
-          background: 'var(--glass-bg)', borderWidth: 1, borderStyle: 'solid',
-          color: 'var(--text-primary)', outline: 'none', fontSize,
-          backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        }}
-      />
-      {searchQuery && (
-        <button
-          onClick={() => setSearchQuery('')}
-          title="Clear search"
-          style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: 4, borderRadius: '50%' }}
-        >
-          <X size={12} />
-        </button>
-      )}
-    </div>
-  );
 
   // Shared mini-player bar (artwork + title/artist + Play) — used both as the
   // docked bar in Library/Home (narrow mode) and, in narrow Now Playing's
@@ -1339,6 +1266,46 @@ export default function App() {
     if (audioRef.current) audioRef.current.volume = isMuted ? 0 : volume;
   }, [currentTrack]);
 
+  // Nav-pill search segment — auto-focus the instant it opens.
+  React.useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  // Force-close (no animation needed) whenever Library stops being the
+  // active view via some *other* route than the search button's own click
+  // handler (that one sets view and opens search together, in the same
+  // batch, so this sees them land in sync and leaves it alone) — e.g.
+  // clicking Home/Library while search happens to be open. The segment
+  // itself stays mounted (it's always visible now, not Library-only); this
+  // just keeps its open/closed state honest rather than silently reopening
+  // pre-expanded next time Library shows.
+  React.useEffect(() => {
+    if (view !== 'library' && searchOpen) {
+      clearTimeout(searchCloseTimerRef.current);
+      setSearchOpen(false);
+    }
+  }, [view, searchOpen]);
+
+  // Auto-close once the query is empty AND the mouse isn't over the field —
+  // "over the field" is tracked via searchHoveredRef (set by the segment's
+  // own onMouseEnter/Leave below) rather than React state, so leaving doesn't
+  // wait on a render. Called both here (query just changed) and from
+  // onMouseLeave (hover just changed), since either can be the condition that
+  // flips last. The grace period absorbs a cursor that merely grazes the edge
+  // on its way past — re-entering hover, or typing again, cancels it via the
+  // clearTimeout at the top.
+  const SEARCH_AUTO_CLOSE_MS = 2000;
+  const scheduleSearchAutoClose = React.useCallback(() => {
+    clearTimeout(searchCloseTimerRef.current);
+    if (!searchOpen || searchHoveredRef.current || searchQuery !== '') return;
+    searchCloseTimerRef.current = setTimeout(() => setSearchOpen(false), SEARCH_AUTO_CLOSE_MS);
+  }, [searchOpen, searchQuery]);
+
+  React.useEffect(() => {
+    scheduleSearchAutoClose();
+    return () => clearTimeout(searchCloseTimerRef.current);
+  }, [searchQuery, scheduleSearchAutoClose]);
+
   // Now Playing text and controls use fixed white/static colors — no artwork-color tinting.
 
   // Automated-test hook — only exists when the page is loaded with ?test=1
@@ -1364,159 +1331,110 @@ export default function App() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* Lives in the draggable title-bar strip above the Library panel, not inside it -
-          centered over the panel's own width (sidebar width + half the remainder), not the
-          full window, so it doesn't drift over the sidebar or the "Library" title below.
-          Same block, same position and size, in narrow mode too — narrow's sidebar never
-          takes layout space (it's an overlay), so it centers on the full window there,
-          same as the sidebarCollapsed case already does at full width. Hidden while the
-          narrow drawer is open, since this sits above the drawer's dimming backdrop and
-          would otherwise float there, interactive, over a dimmed screen — a concern that
-          doesn't exist at full width, where the sidebar never overlays content. */}
-      {view === 'library' && (!isNarrowLayout || sidebarCollapsed) && (
-        <div style={{ position: 'fixed', top: 9, left: (isNarrowLayout || sidebarCollapsed) ? '50vw' : 'calc(88px + (100vw - 88px) / 2)', transform: 'translateX(-50%)', zIndex: 50, WebkitAppRegion: 'no-drag', transition: 'left 0.25s ease' }}>
-          {renderSearchField({ width: isNarrowLayout ? 180 : 224, height: 28, fontSize: 12 })}
-        </div>
-      )}
-
-
-      {/* Sidebar toggle — the same hamburger in the same drag-strip spot at
-          every window width, not just narrow. Right-aligned since the
-          traffic lights always occupy the left edge, so there's no collision
-          risk. At full width this replaces the old edge-of-sidebar pull-tab
-          entirely, and — matching that pull-tab's own behavior — stays up
-          regardless of view, including through Now Playing, since the
-          sidebar there is only ever pushed aside, never covered. Narrow mode
-          keeps its tighter gating: NP there is a full-screen takeover with no
-          sidebar to reach, so the button (and the drawer it opens) hide with
-          it, and it only lives in the draggable strip itself rather than a
-          row of its own below — that row used to cost 42-58px of vertical
-          space for one icon, all of it coming straight out of the track
-          list's share of the window. */}
-      {(!isNarrowLayout || (!isNowPlayingOpen && (view === 'library' || view === 'home'))) && (
-        <button
-          className="clickable player-control-button"
-          title={isNarrowLayout ? undefined : (sidebarCollapsed ? 'Show sidebar (⌘\\)' : 'Hide sidebar (⌘\\)')}
-          style={{
-            position: 'fixed', top: 2, right: 16, zIndex: 51, padding: 10, WebkitAppRegion: 'no-drag',
-            // "Open" reads via icon color, the same language the rest of the
-            // app already uses for an on/selected toggle (repeat, shuffle,
-            // the active sort column, genre filter chips) — not a background
-            // fill, which read as a flat, disconnected blob here.
-            color: (!isNarrowLayout && !sidebarCollapsed) ? 'var(--accent-color)' : 'var(--chrome-text)',
-          }}
-          onClick={() => setSidebarCollapsed(v => !v)}
+      {/* Primary navigation — Search / Add Music / Library / Home, grouped
+          into one glass pill in the draggable title-bar strip, the same spot
+          the old sidebar's hamburger used to occupy, at every window width
+          and every view (including narrow Now Playing's full-screen
+          takeover — these are direct destination buttons with no open/closed
+          state, so there's never a reason to hide them). Right-aligned since
+          the traffic lights always occupy the left edge. Order (right to
+          left, i.e. DOM left to right): Search, Add, Library, Home — Home
+          lands in the same rightmost spot the old hamburger used to. */}
+      <div className="nav-pill" style={{ position: 'fixed', top: 5, right: 16, zIndex: 51, WebkitAppRegion: 'no-drag' }}>
+        {/* Search — always visible, like the other three, but only ever
+            *expands* while Library is the active view (the input itself is
+            conceptually part of Library's UI). Clicking it from anywhere
+            else navigates to Library and opens it in the same motion — see
+            the onClick below. Collapsed to a plain icon button by default;
+            expands in place into a text input on click rather than
+            appearing elsewhere, so the pointer is already resting on it the
+            instant it opens (see the auto-close effects above: hovering it
+            is exactly what keeps it open). The pill's own
+            `position: fixed; right: 16` means growing this segment's width
+            just pushes the pill's left edge further left — no re-centering
+            math needed anywhere else. */}
+        <div
+          className={cx('nav-pill-search', { open: searchOpen })}
+          style={{ width: searchOpen ? (isNarrowLayout ? 150 : 210) : 28 }}
+          onMouseEnter={() => { searchHoveredRef.current = true; clearTimeout(searchCloseTimerRef.current); }}
+          onMouseLeave={() => { searchHoveredRef.current = false; scheduleSearchAutoClose(); }}
         >
-          {/* Narrow mode still morphs to an explicit close (X) icon — this
-              is the drawer's own open/close control there, and the drawer
-              overlays content, so a distinct "close" affordance earns its
-              keep. Full width keeps the same hamburger glyph throughout and
-              shows "open" via the accent color above instead — the sidebar
-              there only ever pushes content aside, so an X reads as more
-              alarming than useful. */}
-          {isNarrowLayout ? (sidebarCollapsed ? <Menu size={18} /> : <X size={18} />) : <Menu size={18} />}
+          {searchOpen ? (
+            <>
+              <Search size={13} className="nav-pill-search-icon" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                className="nav-pill-search-input"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{ padding: searchQuery ? '0 24px 0 24px' : '0 8px 0 24px' }}
+                onKeyDown={e => {
+                  if (e.key !== 'Escape') return;
+                  if (searchQuery) setSearchQuery('');
+                  else { clearTimeout(searchCloseTimerRef.current); setSearchOpen(false); }
+                }}
+              />
+              {searchQuery && (
+                <button className="clickable nav-pill-search-clear" title="Clear search" onClick={() => setSearchQuery('')}>
+                  <X size={12} />
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              className="clickable nav-pill-btn nav-pill-search-toggle"
+              title="Search"
+              onClick={() => {
+                // A real mouse click always has a mouseenter just before it,
+                // but a keyboard/accessibility activation doesn't — without
+                // this, the auto-close effect would see searchHoveredRef
+                // still false the instant searchOpen flips true and
+                // immediately schedule a close, undoing the click that just
+                // opened it.
+                searchHoveredRef.current = true;
+                // Clicking from anywhere but Library jumps there first, in
+                // the same motion — the field is conceptually part of
+                // Library's UI, so "open search" and "show Library" are one
+                // action from every other screen (Home, a Home detail page,
+                // Now Playing at either width).
+                if (view !== 'library') setView('library');
+                setSearchOpen(true);
+              }}
+            >
+              <Search size={14} />
+            </button>
+          )}
+        </div>
+        <button
+          className="clickable nav-pill-btn"
+          title="Add Music"
+          onClick={handleAddFiles}
+        >
+          <Plus size={14} />
+          {!isNarrowLayout && <span>Add</span>}
         </button>
-      )}
-
-      {/* Narrow-mode backdrop: dims the content while the sidebar drawer is
-          open, tap to dismiss. Only relevant in narrow mode — at full width
-          the sidebar pushes content instead of overlaying it. */}
-      {isNarrowLayout && !sidebarCollapsed && (
-        <div className="clickable sidebar-drawer-backdrop" onClick={() => setSidebarCollapsed(true)} />
-      )}
-
-      {/* Sidebar — in narrow mode this becomes a fixed overlay drawer (see
-          .sidebar-drawer in index.css), wider than the full-width icon rail
-          and starts right below the drag-strip (top: 42, from .sidebar-drawer
-          in index.css) — the hamburger now lives inside that strip itself
-          rather than a row of its own below it, so there's nothing left for
-          the drawer's own content to clear; a plain 20px top padding is just
-          breathing room, not a collision guard. Full-width mode's
-          width/padding stay byte-identical to before. */}
-      <div
-        className={cx({ 'sidebar-drawer': isNarrowLayout })}
-        style={{
-          width: isNarrowLayout ? (sidebarCollapsed ? 0 : NARROW_DRAWER_WIDTH) : (sidebarCollapsed ? 0 : 88),
-          overflow: 'hidden', flexShrink: 0, display: 'flex', flexDirection: 'column',
-          padding: isNarrowLayout
-            ? (sidebarCollapsed ? '20px 0 0' : '20px 12px 0')
-            : (sidebarCollapsed ? '24px 0 0' : '0 8px'),
-          ...(isNarrowLayout ? {} : { paddingTop: 24 }),
-          transition: 'width 0.25s ease, padding 0.25s ease',
-        }}
-      >
-        {isNarrowLayout ? (
-          <>
-            {/* Narrow mode: wide rows (icon + label side by side) — the
-                stacked icon-over-text tiles only read well in the slim 88px
-                full-width rail. */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
-              <button
-                className="clickable narrow-drawer-item"
-                style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '12px 14px', borderRadius: 10, background: view === 'home' ? 'var(--glass-active)' : 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 14, fontWeight: 600, textAlign: 'left' }}
-                onClick={() => { setView('home'); setSidebarCollapsed(true); }}
-              >
-                <Home size={20} />
-                <span>Home</span>
-              </button>
-              <button
-                className="clickable narrow-drawer-item"
-                style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '12px 14px', borderRadius: 10, background: view === 'library' ? 'var(--glass-active)' : 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 14, fontWeight: 600, textAlign: 'left' }}
-                onClick={() => { setView('library'); setSidebarCollapsed(true); }}
-              >
-                <ListMusic size={20} />
-                <span>Library</span>
-              </button>
-            </div>
-
-            <div style={{ marginTop: 'auto', marginBottom: 16, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
-              <button
-                className="clickable narrow-drawer-item"
-                style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '12px 14px', borderRadius: 10, background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: 14, fontWeight: 600, textAlign: 'left' }}
-                onClick={() => { handleAddFiles(); setSidebarCollapsed(true); }}
-              >
-                <Music size={20} />
-                <span>Add Files</span>
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
-              <button
-                className={cx("glass-button clickable", { active: view === 'home' })}
-                style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px', background: view === 'home' ? 'var(--glass-active)' : undefined }}
-                onClick={() => setView('home')}
-              >
-                <Home size={18} />
-                <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Home</span>
-              </button>
-              <button
-                className={cx("glass-button", { active: view === 'library' })}
-                style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px', background: view === 'library' ? 'var(--glass-active)' : undefined }}
-                onClick={() => setView('library')}
-              >
-                <ListMusic size={18} />
-                <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Library</span>
-              </button>
-            </div>
-
-            <div style={{ marginTop: 'auto', marginBottom: 24, opacity: sidebarCollapsed ? 0 : 1, transition: 'opacity 0.15s ease' }}>
-              <button
-                className="glass-button"
-                style={{ width: '100%', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 4px' }}
-                onClick={handleAddFiles}
-              >
-                <Music size={18} />
-                <span style={{ fontSize: 10, lineHeight: 1, textAlign: 'center' }}>Add Files</span>
-              </button>
-            </div>
-          </>
-        )}
+        <button
+          className={cx('clickable nav-pill-btn', { active: view === 'library' })}
+          title="Library"
+          onClick={() => setView('library')}
+        >
+          <ListMusic size={14} />
+          {!isNarrowLayout && <span>Library</span>}
+        </button>
+        <button
+          className={cx('clickable nav-pill-btn', { active: view === 'home' })}
+          title="Home"
+          onClick={() => setView('home')}
+        >
+          <Home size={14} />
+          {!isNarrowLayout && <span>Home</span>}
+        </button>
       </div>
 
       {/* Main Content Area */}
-      <div className="glass-panel" style={{ flex: 1, borderRadius: (isNarrowLayout || sidebarCollapsed) ? 16 : '16px 0 0 16px', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', transition: 'border-radius 0.25s ease' }}>
+      <div className="glass-panel" style={{ flex: 1, borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
 
         {/* Column header, deliberately a SIBLING above .scrollable rather than
             sticky inside it — rows then physically cannot pass behind the
@@ -1686,7 +1604,7 @@ export default function App() {
             pointerEvents: isNowPlayingOpen ? 'auto' : 'none',
             zIndex: 5,
             WebkitAppRegion: 'no-drag',
-            clipPath: (isNarrowLayout || sidebarCollapsed) ? 'inset(0 0 0 0 round 16px)' : 'inset(0 0 0 0 round 16px 0 0 0)',
+            clipPath: 'inset(0 0 0 0 round 16px)',
           }}
         >
           <div
