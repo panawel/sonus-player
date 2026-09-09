@@ -979,15 +979,15 @@ export default function App() {
     const ringCircumference = 2 * Math.PI * ringRadius;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <button className="player-control-button clickable" style={{ color: isShuffle ? 'var(--accent-color)' : 'var(--text-secondary)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
+        <button className="player-control-button clickable" style={{ color: isShuffle ? 'var(--accent-color)' : 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
           <Shuffle size={secondarySize} />
         </button>
-        <button className="player-control-button skip-btn clickable" style={{ color: 'var(--text-primary)' }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
+        <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
           <SkipBack size={controlSize} fill="currentColor" />
         </button>
         <button
           className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
-          style={{ width: playSize, height: playSize, color: 'var(--text-primary)', margin: `0 ${playMargin}px`, position: 'relative' }}
+          style={{ width: playSize, height: playSize, color: 'var(--chrome-text)', margin: `0 ${playMargin}px`, position: 'relative' }}
           onClick={(e) => { e.stopPropagation(); handlePlayPauseClick(e); }}
           onMouseDown={handlePlayPausePressStart}
           onMouseUp={handlePlayPausePressEnd}
@@ -1016,10 +1016,10 @@ export default function App() {
             <Play size={playIconSize} fill="currentColor" style={{ marginLeft: 2 }} />
           )}
         </button>
-        <button className="player-control-button skip-btn clickable" style={{ color: 'var(--text-primary)' }} onClick={(e) => { e.stopPropagation(); playNext(false); }}>
+        <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); playNext(false); }}>
           <SkipForward size={controlSize} fill="currentColor" />
         </button>
-        <button className="player-control-button clickable" style={{ color: repeatMode !== 'off' ? 'var(--accent-color)' : 'var(--text-secondary)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
+        <button className="player-control-button clickable" style={{ color: repeatMode !== 'off' ? 'var(--accent-color)' : 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
           {repeatMode === 'one' ? <Repeat1 size={secondarySize} /> : <Repeat size={secondarySize} />}
         </button>
       </div>
@@ -1074,19 +1074,19 @@ export default function App() {
             {currentTrack.thumb ? <img src={currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={20} style={{ margin: 12 }} color="var(--text-secondary)" />}
           </div>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.title}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.artist || ''}</div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--chrome-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.title}</div>
+            <div style={{ fontSize: 12, color: 'var(--chrome-text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.artist || ''}</div>
           </div>
           <button
             className="clickable player-control-button"
-            style={{ padding: 6, color: 'var(--text-primary)', flexShrink: 0 }}
+            style={{ padding: 6, color: 'var(--chrome-text)', flexShrink: 0 }}
             onClick={(e) => { e.stopPropagation(); playPrev(); }}
           >
             <SkipBack size={18} fill="currentColor" />
           </button>
           <button
             className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
-            style={{ width: 36, height: 36, color: 'var(--text-primary)', flexShrink: 0 }}
+            style={{ width: 36, height: 36, color: 'var(--chrome-text)', flexShrink: 0 }}
             // Deliberately togglePlay(), not handlePlayPauseClick() — see the
             // comment where this button first appeared (App.jsx's Library
             // mini-player) for why: that function only toggles when paired
@@ -1097,14 +1097,14 @@ export default function App() {
           </button>
           <button
             className="clickable player-control-button"
-            style={{ padding: 6, color: 'var(--text-primary)', flexShrink: 0 }}
+            style={{ padding: 6, color: 'var(--chrome-text)', flexShrink: 0 }}
             onClick={(e) => { e.stopPropagation(); playNext(false); }}
           >
             <SkipForward size={18} fill="currentColor" />
           </button>
         </>
       ) : (
-        <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Nothing playing</span>
+        <span style={{ color: 'var(--chrome-text-dim)', fontSize: 13 }}>Nothing playing</span>
       )}
     </div>
   );
@@ -1399,7 +1399,7 @@ export default function App() {
             // app already uses for an on/selected toggle (repeat, shuffle,
             // the active sort column, genre filter chips) — not a background
             // fill, which read as a flat, disconnected blob here.
-            color: (!isNarrowLayout && !sidebarCollapsed) ? 'var(--accent-color)' : 'var(--text-primary)',
+            color: (!isNarrowLayout && !sidebarCollapsed) ? 'var(--accent-color)' : 'var(--chrome-text)',
           }}
           onClick={() => setSidebarCollapsed(v => !v)}
         >
@@ -1738,7 +1738,7 @@ export default function App() {
               <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', padding: '16px 20px 24px', boxSizing: 'border-box' }}>
                 {/* Top bar: back chevron, Song|Lyrics tabs, track menu */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, marginBottom: 8 }}>
-                  <button className="player-control-button clickable" style={{ color: 'rgba(255,255,255,0.85)' }} onClick={(e) => { e.stopPropagation(); collapseNowPlaying(); }}>
+                  <button className="player-control-button clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); collapseNowPlaying(); }}>
                     <ChevronDown size={20} />
                   </button>
                   {/* Only a track with lyrics actually has two tabs to switch
@@ -1752,7 +1752,7 @@ export default function App() {
                   )}
                   <button
                     className="player-control-button clickable"
-                    style={{ color: 'rgba(255,255,255,0.85)', visibility: currentTrack ? 'visible' : 'hidden' }}
+                    style={{ color: 'var(--chrome-text)', visibility: currentTrack ? 'visible' : 'hidden' }}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (trackMenu) { setTrackMenu(null); return; }
@@ -1764,7 +1764,7 @@ export default function App() {
                 </div>
 
                 {!currentTrack ? (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--chrome-text-dim)', textAlign: 'center' }}>
                     <Music size={48} style={{ opacity: 0.5, marginBottom: 16 }} />
                     <p>Play a track to see it here.</p>
                   </div>
@@ -1781,9 +1781,9 @@ export default function App() {
                   <>
                     <div ref={lyricsScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
                       {currentTrack.lyrics ? (
-                        <div style={{ fontSize: 15, lineHeight: 1.8, color: 'rgba(255,255,255,0.82)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
+                        <div style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--chrome-text)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
                       ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'rgba(255,255,255,0.35)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--chrome-text-dim)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
                       )}
                     </div>
                     {/* Negative margins cancel this wrapper's own padding so the
@@ -1820,9 +1820,19 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div style={{ textAlign: 'center', flexShrink: 0, marginBottom: 12 }}>
-                      <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.title}</div>
-                      <div style={{ fontSize: 15, color: 'var(--text-secondary)' }}>
+                    {/* position/zIndex are load-bearing, not decoration: the artwork
+                        card above is zIndex: 1 with a 24px-downward, 60px-blur black
+                        drop shadow. At the minimum window height the artwork fills its
+                        row and this block sits flush against its bottom edge, so
+                        without a higher z-index that shadow paints OVER the text and
+                        turns white into ~186/255 gray. It's invisible to
+                        elementFromPoint (box-shadows aren't hit-testable) and to
+                        getComputedStyle (the color really is white) — only a pixel
+                        capture shows it. See docs/ARCHITECTURE.md, "Now Playing glass
+                        backdrop". Colors come from the shared --chrome-text vars in index.css. */}
+                    <div style={{ textAlign: 'center', flexShrink: 0, marginBottom: 12, position: 'relative', zIndex: 2 }}>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--chrome-text)' }}>{currentTrack.title}</div>
+                      <div style={{ fontSize: 15, color: 'var(--chrome-text-dim)' }}>
                         {playerArtistTokens.map((token, i) => (
                           <span key={`${i}:${token}`}>
                             {i > 0 && ' & '}
@@ -1848,7 +1858,7 @@ export default function App() {
                         className="clickable top-progress-bar top-progress-bar--hovered top-progress-bar--narrow wow-slider"
                         style={{ '--progress': `${duration ? ((isSeeking ? seekValue : currentTime) / duration) * 100 : 0}%` }}
                       />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--chrome-text-dim)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
                         <span>{formatTime(isSeeking ? seekValue : currentTime)}</span>
                         <span>{formatTime(duration)}</span>
                       </div>
@@ -1905,7 +1915,7 @@ export default function App() {
               WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale',
             }}>
               {!currentTrack ? (
-                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--chrome-text-dim)', textAlign: 'center' }}>
                       <Music size={48} style={{ opacity: 0.5, marginBottom: 16, margin: '0 auto' }} />
                       <p>Play a track to see it here.</p>
                  </div>
@@ -1975,11 +1985,11 @@ export default function App() {
                       <div ref={lyricsScrollRef} style={{ height: '100%', overflowY: 'auto', padding: '24px 16px 24px 32px', boxSizing: 'border-box' }}>
                         {currentTrack.lyrics ? (
                           <>
-                            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16, direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>Lyrics</div>
-                            <div style={{ fontSize: 16, lineHeight: 1.85, color: 'rgba(255,255,255,0.82)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
+                            <div style={{ fontSize: 12, color: 'var(--chrome-text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16, direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>Lyrics</div>
+                            <div style={{ fontSize: 16, lineHeight: 1.85, color: 'var(--chrome-text)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
                           </>
                         ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'rgba(255,255,255,0.35)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--chrome-text-dim)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
                         )}
                       </div>
                     </div>
@@ -2066,17 +2076,17 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, padding: '0 24px', position: 'relative' }}>
            <div ref={leftClusterRef} style={{ display: 'flex', alignItems: 'center', flexDirection: isUltraCompactPanel ? 'column' : 'row', gap: isUltraCompactPanel ? 4 : 0 }}>
               {isUltraCompactPanel && (
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums', pointerEvents: 'none' }}>
+                <span style={{ fontSize: 13, color: 'var(--chrome-text-dim)', fontVariantNumeric: 'tabular-nums', pointerEvents: 'none' }}>
                   {formatTime(isSeeking ? seekValue : currentTime)} / {formatTime(duration)}
                 </span>
               )}
               <div style={{ display: 'flex', alignItems: 'center' }}>
-                <button className="player-control-button skip-btn clickable" style={{ color: 'var(--text-primary)', padding: skipBtnPadding }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
+                <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)', padding: skipBtnPadding }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
                   <SkipBack size={controlIconSize} fill="currentColor" />
                 </button>
                 <button
                   className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
-                  style={{ width: playPauseSize, height: playPauseSize, color: 'var(--text-primary)', margin: `0 ${playPauseMargin}px`, position: 'relative' }}
+                  style={{ width: playPauseSize, height: playPauseSize, color: 'var(--chrome-text)', margin: `0 ${playPauseMargin}px`, position: 'relative' }}
                   onClick={(e) => { e.stopPropagation(); handlePlayPauseClick(e); }}
                   onMouseDown={handlePlayPausePressStart}
                   onMouseUp={handlePlayPausePressEnd}
@@ -2105,12 +2115,12 @@ export default function App() {
                     <Play size={playPauseIconSize} fill="currentColor" style={{ marginLeft: 2 }} />
                   )}
                 </button>
-                <button className="player-control-button skip-btn clickable" style={{ color: 'var(--text-primary)', padding: skipBtnPadding }} onClick={(e) => { e.stopPropagation(); playNext(false); }}>
+                <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)', padding: skipBtnPadding }} onClick={(e) => { e.stopPropagation(); playNext(false); }}>
                   <SkipForward size={controlIconSize} fill="currentColor" />
                 </button>
               </div>
               {!isUltraCompactPanel && (
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums', marginLeft: 12, flexShrink: 0, pointerEvents: 'none' }}>
+                <span style={{ fontSize: 13, color: 'var(--chrome-text-dim)', fontVariantNumeric: 'tabular-nums', marginLeft: 12, flexShrink: 0, pointerEvents: 'none' }}>
                   {formatTime(isSeeking ? seekValue : currentTime)} / {formatTime(duration)}
                 </span>
               )}
@@ -2125,12 +2135,12 @@ export default function App() {
                  {currentTrack.thumb ? <img src={currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={playerArtworkIconSize} style={{ margin: playerArtworkIconMargin }} color="var(--text-secondary)" />}
                </div>
                <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, flex: 1, gap: 4, pointerEvents: 'auto' }}>
-                 <div ref={playerTitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontWeight: 700, fontSize: 20, lineHeight: 1.2, WebkitMaskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined }}>
+                 <div ref={playerTitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontWeight: 700, fontSize: 20, color: 'var(--chrome-text)', lineHeight: 1.2, WebkitMaskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined }}>
                    <span className={playerTitleDist > 0 ? 'marquee-scroll' : undefined} style={{ display: 'inline-block', '--marquee-distance': `${playerTitleDist}px`, '--marquee-duration': playerTitleDuration }}>
                      {currentTrack.title}
                    </span>
                  </div>
-                 <div ref={playerSubtitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontSize: 15, color: 'var(--text-secondary)', lineHeight: 1.2, WebkitMaskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined }}>
+                 <div ref={playerSubtitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontSize: 15, color: 'var(--chrome-text-dim)', lineHeight: 1.2, WebkitMaskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined }}>
                    <span className={playerSubtitleDist > 0 ? 'marquee-scroll' : undefined} style={{ display: 'inline-block', '--marquee-distance': `${playerSubtitleDist}px`, '--marquee-duration': playerSubtitleDuration }}>
                      {playerArtistTokens.map((token, i) => (
                        // Index-qualified key: duplicate keys corrupt React's keyed
@@ -2149,7 +2159,7 @@ export default function App() {
                </div>
                <button
                  className="player-control-button clickable"
-                 style={{ color: 'var(--text-secondary)', flexShrink: 0, pointerEvents: 'auto' }}
+                 style={{ color: 'var(--chrome-text)', flexShrink: 0, pointerEvents: 'auto' }}
                  onClick={(e) => { e.stopPropagation(); if (trackMenu) { setTrackMenu(null); return; } setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' }); }}
                >
                  <MoreVertical size={22} />
@@ -2188,16 +2198,16 @@ export default function App() {
                 )}
                 <button
                   className="player-control-button clickable"
-                  style={{ color: isMuted ? 'var(--text-secondary)' : 'var(--text-primary)' }}
+                  style={{ color: 'var(--chrome-text)' }}
                   onClick={(e) => { e.stopPropagation(); toggleMute(); }}
                 >
                   {isMuted || volume === 0 ? <VolumeX size={secondaryIconSize} /> : volume < 0.5 ? <Volume1 size={secondaryIconSize} /> : <Volume2 size={secondaryIconSize} />}
                 </button>
               </div>
-              <button className={cx("player-control-button clickable")} style={{ color: repeatMode !== 'off' ? 'var(--accent-color)' : 'var(--text-secondary)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
+              <button className={cx("player-control-button clickable")} style={{ color: repeatMode !== 'off' ? 'var(--accent-color)' : 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
                 {repeatMode === 'one' ? <Repeat1 size={secondaryIconSize} /> : <Repeat size={secondaryIconSize} />}
               </button>
-              <button className={cx("player-control-button clickable")} style={{ color: isShuffle ? 'var(--accent-color)' : 'var(--text-secondary)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
+              <button className={cx("player-control-button clickable")} style={{ color: isShuffle ? 'var(--accent-color)' : 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
                 <Shuffle size={secondaryIconSize} />
               </button>
              </div>

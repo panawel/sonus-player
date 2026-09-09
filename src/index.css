@@ -25,6 +25,12 @@
   --glass-active: rgba(255, 255, 255, 0.25);
   --text-primary: rgba(255, 255, 255, 0.95);
   --text-secondary: rgba(255, 255, 255, 0.55);
+  /* Player panel / mini-player / Now Playing chrome only (both widths) — the
+     track list, Home, sidebar and detail pages keep --text-primary/secondary.
+     Deliberately brighter than those: this text sits on artwork glow and
+     blurred backdrops, where 0.95/0.55 read as gray. One place to tune. */
+  --chrome-text: #fff;
+  --chrome-text-dim: rgba(255, 255, 255, 0.85);
   --accent-color: #0A84FF;
   --accent-hover: #3b9cff;
 }
@@ -217,7 +223,7 @@ input[type="range"].volume-slider:hover::-webkit-slider-thumb {
   transition: color 0.15s ease;
 }
 .player-meta-link:hover {
-  color: var(--text-primary);
+  color: var(--chrome-text);
 }
 
 .skip-btn {
@@ -673,7 +679,7 @@ input[type="range"].top-progress-bar--narrow {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(20px);
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--chrome-text);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -908,5 +914,29 @@ input[type="range"].top-progress-bar--narrow {
 @media (max-width: 460px) {
   .home-quick-picks-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Library Stats card: Sound Quality (donut) and Completeness (bars) side by
+   side. Below 560px (matches App.jsx's own NARROW_LAYOUT_BREAKPOINT — one
+   fewer number to keep in sync, and it's comfortably past where this
+   actually needs to kick in, measured at ~450-500px) they stack instead —
+   DonutChart's legend rows carry several hard minimum widths (label/count/
+   percent), so a ~60%-wide column can't fit them much below that, and
+   nothing in the chain clips: the excess bleeds sideways into Completeness
+   rather than wrapping, reading as jumbled overlapping text. */
+.home-stats-divider {
+  width: 1px;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.06);
+}
+@media (max-width: 560px) {
+  .home-stats-row {
+    flex-direction: column;
+  }
+  .home-stats-divider {
+    width: auto;
+    height: 1px;
+    margin: 4px 20px;
   }
 }

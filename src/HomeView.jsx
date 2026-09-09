@@ -1432,7 +1432,7 @@ const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, play
       {(qualityData.length >= 2 || completenessData) && (
         <div>
           <SectionHeader title="Library Stats" />
-          <div style={{
+          <div className="home-stats-row" style={{
             background: 'rgba(255,255,255,0.025)',
             border: '1px solid rgba(255,255,255,0.06)',
             borderRadius: 14, display: 'flex', alignItems: 'stretch',
@@ -1455,9 +1455,11 @@ const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, play
               </div>
             )}
 
-            {/* Vertical divider */}
+            {/* Divider — vertical between the two side-by-side halves, or
+                horizontal once they stack (see .home-stats-divider's media
+                query in index.css) */}
             {qualityData.length >= 2 && completenessData && (
-              <div style={{ width: 1, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
+              <div className="home-stats-divider" />
             )}
 
             {/* Right — Completeness bars (flex 2 ≈ 40%) */}
