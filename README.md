@@ -94,9 +94,10 @@ Full-screen artwork with an ambient colour wash sampled from the cover, and embe
 
 ### Resizes down to phone width
 
-The window isn't locked to one desktop shape — it resizes all the way down to phone-portrait proportions (as narrow as ~380px). Below that point the whole interface reflows rather than just shrinking: the sidebar becomes a swipe-in drawer, the player collapses to a compact bar with cover art and playback controls, and Now Playing switches to a single-column view with a tab for lyrics. Same library, same tag editor, same controls — just narrower.
+The window isn't locked to one desktop shape — it resizes all the way down to phone-portrait proportions (as narrow as ~380px). Below that point the whole interface reflows rather than just shrinking: Search/Add/Library/Home collapse to a single icon-only pill, the player collapses to a compact bar with cover art and playback controls, and Now Playing switches to a single-column view with a tab for lyrics. Same library, same tag editor, same controls — just narrower.
 
 <p>
+<img src="docs/assets/narrow-home.png" alt="Home at phone-portrait width" width="300">
 <img src="docs/assets/narrow-library.png" alt="Library at phone-portrait width" width="300">
 <img src="docs/assets/narrow-now-playing.png" alt="Now Playing at phone-portrait width" width="300">
 </p>
