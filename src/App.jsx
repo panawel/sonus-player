@@ -1214,28 +1214,32 @@ export default function App() {
     if (!window.electronAPI) return;
     const unsub = window.electronAPI.onTagSaved?.(({ filePath, thumb, ...savedFields }) => {
       setLibrary(lib => lib.map(t => t.filePath === filePath ? { ...t, ...savedFields, thumb } : t));
+      setCurrentTrack(ct => (ct && ct.filePath === filePath) ? { ...ct, ...savedFields, thumb } : ct);
 
-      setCurrentTrack(ct => {
-        if (!ct || ct.filePath !== filePath) return ct;
-        // writeTag rewrites the whole file on disk (node-id3's update() isn't a
-        // patch), and <audio> has that exact file open for streaming/decoding -
-        // overwriting it out from under an active read can stall the decoder
-        // (timeupdate stops firing). Force a clean reload and restore position.
-        const audio = audioRef.current;
-        if (audio) {
-          const resumeTime = audio.currentTime;
-          const wasPlaying = !audio.paused;
-          const onLoaded = () => {
-            audio.currentTime = resumeTime;
-            if (wasPlaying) audio.play();
-            audio.removeEventListener('loadedmetadata', onLoaded);
-          };
-          audio.addEventListener('loadedmetadata', onLoaded);
-          if (!wasPlaying) suppressNextAutoplayRef.current = true;
-          audio.load();
-        }
-        return { ...ct, ...savedFields, thumb };
-      });
+      // The <audio> reload below deliberately lives OUT here, not inside the
+      // setCurrentTrack updater. React StrictMode invokes updaters twice in
+      // dev; the first call's audio.load() synchronously resets the element to
+      // 0/paused, so the second call captured "resume at 0, wasn't playing"
+      // and left the track stopped at the start. Production React never
+      // double-invokes, which is why this only ever broke under npm run dev.
+      // Guarded by the save-while-playing smoke case (production path).
+      if (currentTrackRef.current?.filePath !== filePath) return;
+      const audio = audioRef.current;
+      if (!audio) return;
+      // writeTag rewrites the whole file on disk (node-id3's update() isn't a
+      // patch), and <audio> has that exact file open for streaming/decoding -
+      // overwriting it out from under an active read can stall the decoder
+      // (timeupdate stops firing). Force a clean reload and restore position.
+      const resumeTime = audio.currentTime;
+      const wasPlaying = !audio.paused;
+      const onLoaded = () => {
+        audio.currentTime = resumeTime;
+        if (wasPlaying) audio.play();
+        audio.removeEventListener('loadedmetadata', onLoaded);
+      };
+      audio.addEventListener('loadedmetadata', onLoaded);
+      if (!wasPlaying) suppressNextAutoplayRef.current = true;
+      audio.load();
     });
     return unsub;
   }, []);

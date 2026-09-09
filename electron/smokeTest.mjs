@@ -1015,6 +1015,94 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     failures.push(`file-open launch error: ${err.stack || err}`);
   }
 
+  // ── Saving tags on the playing track keeps it playing from the same spot ──
+  // The Tag Editor's Save rewrites the file in place while <audio> has it
+  // open; App.jsx's onTagSaved handler forces a clean reload and restores
+  // position. Exercises the real path: renderer → preload writeTag →
+  // fs:writeTag → tag-editor:saved → onTagSaved. Regression guard for the
+  // production path only: the bug this was written for (the reload living
+  // inside a setCurrentTrack updater, which StrictMode double-invokes) shows
+  // up under npm run dev, not in the built app this suite runs — see the
+  // matching "fails silently" row in CLAUDE.md.
+  try {
+    const fixture = path.join(__dirname, '..', 'test-fixture.mp3');
+    const copy = path.join(app.getPath('userData'), 'save-while-playing.mp3');
+    // A realistic size, not the 320KB fixture: a small file is fully buffered
+    // before the save, so an in-place rewrite can't disturb it and the case
+    // passes vacuously. Repeat the fixture's MPEG frames (self-delimiting)
+    // after its ID3v2 tag to get ~5MB / ~5 minutes that Chromium streams in
+    // ranges while it's being rewritten underneath.
+    const fixtureBytes = await fs.readFile(fixture);
+    let audioStart = 0;
+    if (fixtureBytes.toString('latin1', 0, 3) === 'ID3') {
+      const s = (fixtureBytes[6] << 21) | (fixtureBytes[7] << 14) | (fixtureBytes[8] << 7) | fixtureBytes[9];
+      audioStart = 10 + s;
+    }
+    const frames = fixtureBytes.subarray(audioStart);
+    await fs.writeFile(copy, Buffer.concat([fixtureBytes.subarray(0, audioStart), ...Array(15).fill(frames)]));
+    const coverB64 = 'data:image/jpeg;base64,' + (await fs.readFile(path.join(__dirname, '..', 'scripts', 'fixture-cover.jpg'))).toString('base64');
+    const [track] = await parseFilePaths([copy]); // also seeds the index entry writeTag's sync needs
+    mainWindow.webContents.send('open-external-file', { tracks: [track], failedCount: 0 });
+    await sleep(900);
+
+    const before = await mainWindow.webContents.executeJavaScript(`
+      (async () => {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const a = document.querySelector('audio');
+        if (!a) return { noAudio: true };
+        for (let i = 0; i < 200 && a.readyState < 1; i++) await sleep(50);
+        // Muted playback sidesteps Chromium's no-gesture autoplay block, so
+        // wasPlaying is genuinely true when the save lands.
+        a.muted = true;
+        let playErr = null;
+        try { await a.play(); } catch (e) { playErr = String(e); }
+        a.currentTime = 5;
+        for (let i = 0; i < 60 && a.currentTime < 4; i++) await sleep(50);
+        const t0 = a.currentTime;
+        await sleep(600);
+        const advanced = a.currentTime - t0;
+        window.__saveDiag = { error: 0, pause: 0, emptied: 0, loadedmetadata: 0, errCode: null };
+        a.addEventListener('error', () => { window.__saveDiag.error++; window.__saveDiag.errCode = a.error?.code ?? null; });
+        a.addEventListener('pause', () => window.__saveDiag.pause++);
+        a.addEventListener('emptied', () => window.__saveDiag.emptied++);
+        a.addEventListener('loadedmetadata', () => window.__saveDiag.loadedmetadata++);
+        const snap = { paused: a.paused, currentTime: a.currentTime, advanced, playErr,
+          activeTitle: document.querySelector('.track-row.active')?.textContent ?? null };
+        const res = await window.electronAPI.writeTag(${JSON.stringify(copy)}, { title: 'Saved While Playing', picture: ${JSON.stringify(coverB64)} });
+        return { ...snap, writeOk: !!res?.success };
+      })()
+    `, true);
+
+    const after = await waitFor(
+      `(() => {
+        const a = document.querySelector('audio');
+        const lib = window.__sonusTest.getLibrary();
+        return {
+          paused: a ? a.paused : null, currentTime: a ? a.currentTime : null,
+          errCode: a?.error?.code ?? null, diag: window.__saveDiag,
+          titleUpdated: lib.some(t => t.title === 'Saved While Playing'),
+          activeTitle: document.querySelector('.track-row.active')?.textContent ?? null,
+        };
+      })()`,
+      (s) => s && s.titleUpdated && s.paused === false && s.currentTime >= 4,
+      { timeout: 5000 },
+    );
+    check(before.writeOk, 'save-while-playing: writeTag succeeded');
+    check(!before.noAudio && before.playErr === null && before.paused === false && before.advanced > 0.3,
+      `save-while-playing: track was genuinely playing before the save (paused ${before.paused}, advanced ${before.advanced?.toFixed(2)}s, playErr ${before.playErr})`);
+    check(after.titleUpdated, 'save-while-playing: tag-editor:saved reached the renderer');
+    check(after.diag?.error === 0, `save-while-playing: no media error during the in-place rewrite (errors ${after.diag?.error}, code ${after.diag?.errCode})`);
+    check(after.paused === false, `save-while-playing: still playing after the save (paused ${after.paused})`);
+    check(after.currentTime >= 4 && after.currentTime <= 12, `save-while-playing: resumed near the same spot, not rewound (${after.currentTime?.toFixed(2)}s)`);
+    check(typeof after.activeTitle === 'string' && after.activeTitle.includes('Saved While Playing'),
+      `save-while-playing: same track still current (active row: ${JSON.stringify(after.activeTitle)})`);
+
+    await mainWindow.webContents.executeJavaScript(`window.__sonusTest.setLibrary([])`, true);
+    await sleep(150);
+  } catch (err) {
+    failures.push(`save-while-playing error: ${err.stack || err}`);
+  }
+
   // ── Re-opening the already-loaded file restarts it ───────────────────────
   // Regression guard for a real bug: <audio>'s src is derived from the track's
   // path, so re-opening the file that is already loaded produces an IDENTICAL
