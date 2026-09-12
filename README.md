@@ -134,11 +134,12 @@ Supports **MP3, FLAC, WAV, OGG, M4A and AAC**.
 
 Your music library, play counts and files stay on your Mac. There are no accounts, no analytics and no telemetry of any kind — nothing about what you listen to is ever sent anywhere.
 
-**Sonus never touches the network unless you explicitly ask it to.** There are exactly two things that reach out, both user-initiated:
+**Sonus never touches the network unless you explicitly ask it to.** There are exactly three things that reach out, all user-initiated:
 
 | When | What it contacts | Why |
 | --- | --- | --- |
 | You click **Search Online** in the Tag Editor | iTunes Search API, MusicBrainz, Cover Art Archive, lrclib | Look up tags, cover art and lyrics for the track you're editing |
+| You click **Start Mix** on a track | MusicBrainz, ListenBrainz Labs, Deezer | Find similar tracks in your library — all three are free and keyless, no account needed |
 | You click **Search in YouTube** | Opens youtube.com in your browser | You asked it to |
 
 That's the whole list. The UI font is bundled in the app rather than fetched from a CDN, so Sonus makes **no requests at all on launch** and behaves identically offline.
