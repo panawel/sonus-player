@@ -1,10 +1,11 @@
 import { useRef, useEffect, useLayoutEffect, useMemo } from 'react';
-import { Music, Play, Shuffle, ChevronLeft, Calendar, Headphones, AlertCircle } from 'lucide-react';
+import { Music, Play, Shuffle, ChevronLeft, Calendar, Headphones, AlertCircle, LoaderCircle, Sparkles } from 'lucide-react';
 import TrackList from './TrackList.jsx';
 import TrackListHeader from './TrackListHeader.jsx';
 import { useTrackSort } from './useTrackSort.js';
 import { useTrackSelection } from './useTrackSelection.js';
 import { useIsNarrow } from './useIsNarrow.js';
+import { useMix } from './useMix.js';
 import {
   ULTRA_COMPACT_PANEL_BREAKPOINT, LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT,
   extraColumnFitCount, detailExtraColumns,
@@ -33,7 +34,12 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
     0, extraColumnFitCount(isAlbumColTierHidden, isYearColTierHidden, isGenreColTierHidden)
   );
 
+  // No-op (status stays 'idle') for every item type except 'mix' — safe to
+  // call unconditionally alongside the synchronous types below.
+  const mix = useMix(item, library);
+
   const tracks = useMemo(() => {
+    if (item.type === 'mix') return mix.tracks;
     if (item.type === 'album') return library.filter(t => (t.album || '').toLowerCase() === item.key.toLowerCase());
     if (item.type === 'year') {
       return library
@@ -64,7 +70,7 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
       );
     }
     return library.filter(t => splitArtists(t.artist || '').some(a => a.toLowerCase() === item.key.toLowerCase()));
-  }, [item, library]);
+  }, [item, library, mix.tracks]);
 
   const innerScrollRef = useRef(null);
 
@@ -90,7 +96,20 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
     }
   }, []); // mount-only
 
-  const artwork = useMemo(() => tracks.find(t => t.thumb)?.thumb || null, [tracks]);
+  // The seed track a mix was started from — item.key is its filePath.
+  const seedTrack = useMemo(
+    () => item.type === 'mix' ? library.find(t => t.filePath === item.key) ?? null : null,
+    [item, library]
+  );
+
+  // A mix's own artwork is the seed track's, so the hero visibly ties back
+  // to "the song you started this from" — falling back to the first result
+  // track's artwork (matching every other type below) only if the seed has
+  // none of its own.
+  const artwork = useMemo(
+    () => (item.type === 'mix' ? seedTrack?.thumb : null) || tracks.find(t => t.thumb)?.thumb || null,
+    [tracks, item.type, seedTrack]
+  );
 
   const mosaicArtworks = useMemo(() => {
     if (item.type !== 'language') return null;
@@ -107,6 +126,17 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
   }, [item.type, tracks]);
 
   const subtitle = useMemo(() => {
+    if (item.type === 'mix') {
+      // 'idle' is useMix's useState initial value, true for the one render
+      // before its effect has actually run (even on a cache hit — the
+      // lookup itself only happens inside that effect). Treating it as
+      // anything but "still finding out" would flash a misleading "0
+      // tracks" here for a frame, every single time.
+      if (mix.status === 'loading' || mix.status === 'idle') return 'Finding similar tracks…';
+      if (mix.status === 'error') return "Couldn't reach the similarity services — check your connection.";
+      if (mix.status === 'empty') return 'No similar tracks found in your library yet.';
+      return `Based on ${seedTrack?.artist || 'this track'} · ${tracks.length} track${tracks.length !== 1 ? 's' : ''}`;
+    }
     const parts = [];
     if (item.type === 'album') {
       const artist = tracks.find(t => t.artist)?.artist;
@@ -126,7 +156,7 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
     const totalSec = tracks.reduce((sum, t) => sum + (t.duration || 0), 0);
     if (totalSec > 60) parts.push(formatDuration(totalSec));
     return parts.join(' · ');
-  }, [tracks, item.type]);
+  }, [tracks, item.type, mix.status, seedTrack]);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -179,24 +209,26 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
             border: '1px solid rgba(255,255,255,0.1)',
           }}>
             {artwork
-              ? <img src={artwork} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={item.key} />
+              ? <img src={artwork} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={item.label ?? item.key} />
               : item.type === 'year'
                 ? <Calendar size={56} color="var(--text-secondary)" />
                 : item.type === 'bitrate'
                   ? <Headphones size={56} color="var(--text-secondary)" />
                   : item.type === 'missing-metadata'
                     ? <AlertCircle size={56} color="var(--text-secondary)" />
-                    : <Music size={56} color="var(--text-secondary)" />
+                    : item.type === 'mix'
+                      ? <Sparkles size={56} color="var(--text-secondary)" />
+                      : <Music size={56} color="var(--text-secondary)" />
             }
           </div>
         )}
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-            {item.type === 'album' ? 'Album' : item.type === 'year' ? 'Year' : item.type === 'bitrate' ? 'Quality' : item.type === 'missing-metadata' ? 'Metadata' : item.type === 'language' ? 'Language' : 'Artist'}
+            {item.type === 'album' ? 'Album' : item.type === 'year' ? 'Year' : item.type === 'bitrate' ? 'Quality' : item.type === 'missing-metadata' ? 'Metadata' : item.type === 'language' ? 'Language' : item.type === 'mix' ? 'Mix' : 'Artist'}
           </div>
           <h2 style={{ fontSize: 'clamp(22px, 3vw, 40px)', fontWeight: 800, marginBottom: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {item.type === 'missing-metadata' ? (MISSING_TITLES[item.key] ?? item.key) : item.key}
+            {item.type === 'missing-metadata' ? (MISSING_TITLES[item.key] ?? item.key) : item.type === 'mix' ? item.label : item.key}
           </h2>
           <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 22 }}>
             {subtitle}
@@ -224,45 +256,72 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
         </div>
       </div>
 
-      {/* Column header — outside the scroll box below, so rows never pass
-          behind the labels (same reason as the Library screen). */}
-      {/* paddingRight 6 matches the scrollbar gutter the scroller below reserves
-          — the header is outside it and so keeps that width. Same compensation
-          the Library screen makes; the smoke suite asserts both to the pixel. */}
-      <div style={{ flexShrink: 0, marginBottom: 6, paddingRight: 6 }}>
-        <TrackListHeader
-          sort={sortApi.sort}
-          onCycleColumn={sortApi.cycleColumn}
-          density={density}
-          onDensityChange={onDensityChange}
-          showAlbum={false}
-          extraColumns={visibleExtraColumns}
-        />
-      </div>
+      {item.type === 'mix' && mix.status !== 'ready' ? (
+        // A mix is the only Details page that isn't instant — this replaces
+        // the header+tracklist while there's nothing (yet, or ever) to list.
+        // 'ready' with zero tracks can't happen (useMix reports that as
+        // 'empty'), so this and the tracklist below are mutually exclusive.
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', textAlign: 'center', gap: 12 }}>
+          {/* 'idle' reads as loading too — see the matching comment on the
+              subtitle above for why it's a real, reachable state here. */}
+          {mix.status === 'loading' || mix.status === 'idle' ? (
+            <LoaderCircle size={32} className="spin" />
+          ) : (
+            <AlertCircle size={32} style={{ opacity: 0.5 }} />
+          )}
+          {mix.status === 'error' && (
+            <button
+              className="glass-button clickable"
+              style={{ padding: '8px 20px', borderRadius: 20, fontSize: 13, fontWeight: 600 }}
+              onClick={mix.retry}
+            >
+              Try Again
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Column header — outside the scroll box below, so rows never pass
+              behind the labels (same reason as the Library screen). */}
+          {/* paddingRight 6 matches the scrollbar gutter the scroller below reserves
+              — the header is outside it and so keeps that width. Same compensation
+              the Library screen makes; the smoke suite asserts both to the pixel. */}
+          <div style={{ flexShrink: 0, marginBottom: 6, paddingRight: 6 }}>
+            <TrackListHeader
+              sort={sortApi.sort}
+              onCycleColumn={sortApi.cycleColumn}
+              density={density}
+              onDensityChange={onDensityChange}
+              showAlbum={false}
+              extraColumns={visibleExtraColumns}
+            />
+          </div>
 
-      {/* Track list — unified engine (no drag: detail order is sort-driven) */}
-      <div
-        ref={innerScrollRef}
-        style={{ flex: 1, overflowY: 'auto', marginRight: -8, paddingRight: 8, scrollbarGutter: 'stable' }}
-        onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop)}
-      >
-        <TrackList
-          tracks={sortApi.sorted}
-          currentTrack={currentTrack}
-          isPlaying={isPlaying}
-          density={density}
-          selection={selection}
-          sort={sortApi.sort}
-          playTrack={playTrack}
-          togglePlay={togglePlay}
-          onShowMenu={onShowMenu}
-          onRemoveTracks={onRemoveTracks}
-          scrollElRef={innerScrollRef}
-          showAlbum={false}
-          extraColumns={visibleExtraColumns}
-          initialOffset={savedScrollTop}
-        />
-      </div>
+          {/* Track list — unified engine (no drag: detail order is sort-driven) */}
+          <div
+            ref={innerScrollRef}
+            style={{ flex: 1, overflowY: 'auto', marginRight: -8, paddingRight: 8, scrollbarGutter: 'stable' }}
+            onScroll={(e) => onScrollChange?.(e.currentTarget.scrollTop)}
+          >
+            <TrackList
+              tracks={sortApi.sorted}
+              currentTrack={currentTrack}
+              isPlaying={isPlaying}
+              density={density}
+              selection={selection}
+              sort={sortApi.sort}
+              playTrack={playTrack}
+              togglePlay={togglePlay}
+              onShowMenu={onShowMenu}
+              onRemoveTracks={onRemoveTracks}
+              scrollElRef={innerScrollRef}
+              showAlbum={false}
+              extraColumns={visibleExtraColumns}
+              initialOffset={savedScrollTop}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

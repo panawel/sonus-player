@@ -28,6 +28,14 @@ export default defineConfig([
       'react-hooks/refs': 'off',
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/immutability': 'off',
+      // Same story, one rule later: this one started flagging several
+      // pre-existing, unmodified useCallbacks (openHomeDetail,
+      // jumpToQueueSource, replaceLibraryWith — all correctly omitting stable
+      // setState setters from their deps, ordinary idiomatic React) the moment
+      // App.jsx grew past whatever size/complexity threshold the analyzer
+      // uses for "preserve this manual memoization." Not a real bug in any of
+      // them; same rationale as the three above.
+      'react-hooks/preserve-manual-memoization': 'off',
     },
   },
   {

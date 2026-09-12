@@ -84,7 +84,7 @@ function TrackRowImpl({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={(e) => onRowClick?.(track, index, e)}
-      onDoubleClick={() => onRowDoubleClick?.(track)}
+      onDoubleClick={() => onRowDoubleClick?.(track, index)}
       onMouseDown={(e) => {
         if (e.button !== 2) return;
         e.preventDefault();
@@ -123,7 +123,7 @@ function TrackRowImpl({
         {showOverlay && (
           <div
             style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: hovered ? 'center' : 'flex-end', justifyContent: 'center', cursor: 'pointer', gap: 2, paddingBottom: hovered ? 0 : 6 }}
-            onClick={(e) => { e.stopPropagation(); onPlayToggle?.(track); }}
+            onClick={(e) => { e.stopPropagation(); onPlayToggle?.(track, index); }}
             onDoubleClick={(e) => e.stopPropagation()}
           >
             {hovered

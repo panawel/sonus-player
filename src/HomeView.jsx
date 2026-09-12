@@ -141,7 +141,7 @@ const AlbumCard = memo(function AlbumCard({ album, onOpen, playAllTracks }) {
             transition: 'opacity 0.18s ease',
             pointerEvents: hovered ? 'auto' : 'none',
           }}
-          onClick={(e) => { e.stopPropagation(); playAllTracks(album.tracks, false); }}
+          onClick={(e) => { e.stopPropagation(); playAllTracks(album.tracks, false, { label: album.name, item: { type: 'album', key: album.name } }); }}
         >
           <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
             <Play size={20} fill="#000" color="#000" style={{ marginLeft: 2 }} />
@@ -189,7 +189,7 @@ const ArtistCard = memo(function ArtistCard({ artist, onOpen, playAllTracks }) {
             transition: 'opacity 0.18s ease',
             pointerEvents: hovered ? 'auto' : 'none',
           }}
-          onClick={(e) => { e.stopPropagation(); playAllTracks(artist.tracks, false); }}
+          onClick={(e) => { e.stopPropagation(); playAllTracks(artist.tracks, false, { label: artist.name, item: { type: 'artist', key: artist.name } }); }}
         >
           <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
             <Play size={18} fill="#000" color="#000" style={{ marginLeft: 2 }} />
@@ -435,7 +435,7 @@ function HeroBanner({ item, onOpen, playAllTracks, onHoverChange }) {
             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 20px', borderRadius: 24, background: '#fff', color: '#000', border: 'none', fontWeight: 700, fontSize: 13, cursor: 'pointer', transition: 'transform 0.15s ease, filter 0.15s ease' }}
             onMouseEnter={e => e.currentTarget.style.filter = 'brightness(0.9)'}
             onMouseLeave={e => e.currentTarget.style.filter = ''}
-            onClick={() => playAllTracks(item.tracks, false)}
+            onClick={() => playAllTracks(item.tracks, false, { label: item.name, item: { type: 'artist', key: item.name } })}
           >
             <Play size={14} fill="#000" color="#000" />
             Play
@@ -445,7 +445,7 @@ function HeroBanner({ item, onOpen, playAllTracks, onHoverChange }) {
             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 20px', borderRadius: 24, background: 'rgba(255,255,255,0.15)', color: '#fff', border: '1px solid rgba(255,255,255,0.28)', fontWeight: 600, fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(10px)', transition: 'background 0.15s ease' }}
             onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.25)'}
             onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
-            onClick={() => playAllTracks(item.tracks, true)}
+            onClick={() => playAllTracks(item.tracks, true, { label: item.name, item: { type: 'artist', key: item.name } })}
           >
             <Shuffle size={13} />
             Shuffle

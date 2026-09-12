@@ -12,6 +12,7 @@ import HomeView from './HomeView';
 import HomeDetailView from './HomeDetailView';
 import cx from 'classnames';
 import { splitArtists, isRTL } from './audioUtils.js';
+import { __setMixCacheForTest } from './useMix.js';
 import {
   LIBRARY_EXTRA_COLUMNS, ULTRA_COMPACT_PANEL_BREAKPOINT,
   LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT, extraColumnFitCount,
@@ -43,6 +44,19 @@ const NARROW_PLAYER_PANEL_HEIGHT = 72;
 // left, as the window narrows. Breakpoints/rationale live in trackUtils.js
 // (LIBRARY_YEAR_COL_BREAKPOINT / LIBRARY_GENRE_COL_BREAKPOINT), shared with
 // HomeDetailView.jsx's own extra columns.
+
+// Same display text HomeDetailView's own header uses for a homeDetailItem —
+// its MISSING_TITLES map is local to that file, small enough to duplicate
+// here for the Now Playing "Playing from" breadcrumb rather than export it
+// for one lookup. Module-level (not component-scoped) so referencing it
+// inside a useCallback below never becomes an exhaustive-deps dependency.
+// A mix's `key` is its seed track's filePath (not human-readable), so it
+// carries its own display text instead — everything else's key already is one.
+const detailItemLabel = (item) => item.type === 'mix'
+  ? item.label
+  : item.type === 'missing-metadata'
+    ? ({ art: 'Missing Art', year: 'Missing Year', lyrics: 'Missing Lyrics' }[item.key] ?? item.key)
+    : item.key;
 
 export default function App() {
   const [library, setLibrary] = useState([]);
@@ -226,7 +240,16 @@ export default function App() {
   // History State
   const [playbackHistory, setPlaybackHistory] = useState([]);
 
-  const playTrack = React.useCallback((track, isBack = false) => {
+  // Which multi-track source (if any) populated the currently-playing queue —
+  // null means plain/unlabeled playback. Shape: { label: 'Infected Mushroom',
+  // item: { type: 'artist', key: 'Infected Mushroom' } }, `item` reusing the
+  // exact shape `homeDetailItem` already uses, so "jump back" is just opening
+  // that same detail page. Purely in-memory UI state — never persisted, never
+  // something the user names or manages; see the queueSource-setting/-clearing
+  // comments on playAllTracks/playTrack/playTrackFresh below for the rules.
+  const [queueSource, setQueueSource] = useState(null);
+
+  const playTrack = React.useCallback((track, isBack = false, source) => {
     if (!isBack && currentTrack && currentTrack.filePath !== track.filePath) {
       setPlaybackHistory(prev => {
         const newHistory = [...prev, currentTrack];
@@ -249,7 +272,25 @@ export default function App() {
       audioRef.current.play().catch(() => { /* autoplay policy, or unreadable file — onError handles the latter */ });
     }
     setCurrentTrack(track);
+    // `source` has three meaningful states, not two: omitted (undefined) —
+    // this is a plain queue *continuation* (skip next/prev, natural
+    // end-of-track advance, the forced-queue drain after Play All) — leave
+    // queueSource exactly as it was, since we're still inside the same list.
+    // `null` — an explicit fresh single-track pick (see playTrackFresh below)
+    // that breaks away from whatever was queued — clear it. An object — a new
+    // multi-track source (playAllTracks) — replace it.
+    if (source !== undefined) setQueueSource(source);
   }, [currentTrack]);
+
+  // The `playTrack` handed to plain row-click/double-click/Enter interactions
+  // (Library, Home, detail pages) — anywhere a single ad-hoc track is chosen
+  // outside of Play All/Shuffle. Always clears queueSource: manually picking
+  // one specific track is a deliberate break from whatever multi-track queue
+  // (an artist's Play All, later a Mix) was previously playing, so the
+  // "Playing from: X" breadcrumb would be lying if it stuck around.
+  const playTrackFresh = React.useCallback((track, isBack = false) => {
+    playTrack(track, isBack, null);
+  }, [playTrack]);
 
   // Home screen state
   const [homeDetailItem, setHomeDetailItem] = useState(null);
@@ -272,13 +313,50 @@ export default function App() {
     setHomeDetailItem(item);
   }, []);
 
-  // Play a list of tracks in order (or shuffled), queueing the rest via forcedNextQueueRef.
-  const playAllTracks = React.useCallback((tracks, shuffle = false) => {
+  // "Playing from: X" breadcrumb tap target (Now Playing) — jumps to the same
+  // detail page Home's own cards open, via the same setHomeDetailItem path.
+  // setHomeDetailOrigin('now_playing') makes that page's own back-chevron
+  // read "‹ Now Playing" and return here, closing the round trip with the
+  // exact mechanism Now Playing's clickable artist/album/year links already
+  // use — not something new.
+  const jumpToQueueSource = React.useCallback(() => {
+    if (!queueSource?.item) return;
+    setHomeDetailOrigin('now_playing');
+    setView('home');
+    setHomeDetailItem(queueSource.item);
+  }, [queueSource]);
+
+  // Play a list of tracks in order (or shuffled), queueing the rest via
+  // forcedNextQueueRef. `source` (see queueSource above) labels the Now
+  // Playing breadcrumb — omit it for a source with no meaningful "place" to
+  // label (e.g. Quick Picks' randomized grab-bag).
+  const playAllTracks = React.useCallback((tracks, shuffle = false, source = null) => {
     if (!tracks || tracks.length === 0) return;
     let ordered = shuffle ? [...tracks].sort(() => Math.random() - 0.5) : tracks;
-    playTrack(ordered[0], false);
+    playTrack(ordered[0], false, source);
     forcedNextQueueRef.current = ordered.slice(1).map(t => t.filePath);
   }, [playTrack]);
+
+  // HomeDetailView's own Play All/Shuffle, pre-labeled with whichever
+  // Artist/Album/Year/Quality/… page is currently open — HomeDetailView.jsx
+  // itself needs no changes, since App.jsx already has homeDetailItem right
+  // here where the component is rendered below.
+  const detailPlayAllTracks = React.useCallback((tracks, shuffle) => {
+    playAllTracks(tracks, shuffle, homeDetailItem ? { label: detailItemLabel(homeDetailItem), item: homeDetailItem } : null);
+  }, [playAllTracks, homeDetailItem]);
+
+  // HomeDetailView's playTrack — double-click, the artwork play button, and
+  // Enter on a details-screen row. `tracks`/`index` are the displayed list and
+  // the picked row's position within it, forwarded by TrackList (see its
+  // handlePlayToggle/handleRowDoubleClick); slicing from `index` and handing
+  // the rest to playAllTracks continues through the list exactly like Play
+  // All would, so "Playing from X" stays honest instead of being a label with
+  // no actual continuation. Falls back to a plain fresh pick if TrackList
+  // somehow doesn't supply them.
+  const detailPlayTrack = React.useCallback((track, isBack, tracks, index) => {
+    if (!tracks || index == null) { playTrack(track, isBack, null); return; }
+    playAllTracks(tracks.slice(index), false, homeDetailItem ? { label: detailItemLabel(homeDetailItem), item: homeDetailItem } : null);
+  }, [playTrack, playAllTracks, homeDetailItem]);
 
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
 
@@ -447,6 +525,9 @@ export default function App() {
     e.preventDefault();
     e.stopPropagation();
     if (window.electronAPI && e.dataTransfer.files) {
+      // getPathForFile resolves a dropped folder's real path the same way it
+      // does a file's; fs:parseFiles (main.js) is what expands it into the
+      // tracks inside it, recursively — nothing folder-specific needed here.
       const paths = Array.from(e.dataTransfer.files).map(f => window.electronAPI.getPathForFile(f)).filter(Boolean);
       if (paths.length === 0) return;
       const data = await window.electronAPI.parseFiles(paths);
@@ -993,6 +1074,10 @@ export default function App() {
   // docked bar in Library/Home (narrow mode) and, in narrow Now Playing's
   // Lyrics tab, as a way to see/control playback without switching back to
   // the Song tab. Only what tapping the bar does differs between the two.
+  const miniRingSize = 36 + 8;
+  const miniRingRadius = miniRingSize / 2 - 2;
+  const miniRingCircumference = 2 * Math.PI * miniRingRadius;
+
   const renderMiniPlayerBar = (onBarClick) => (
     <div className="clickable" onClick={onBarClick} style={{ height: NARROW_PLAYER_PANEL_HEIGHT, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', background: 'var(--glass-panel)', backdropFilter: 'blur(40px)', cursor: 'default', zIndex: 6, flexShrink: 0 }}>
       {currentTrack ? (
@@ -1013,13 +1098,34 @@ export default function App() {
           </button>
           <button
             className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
-            style={{ width: 36, height: 36, color: 'var(--chrome-text)', flexShrink: 0 }}
-            // Deliberately togglePlay(), not handlePlayPauseClick() — see the
-            // comment where this button first appeared (App.jsx's Library
-            // mini-player) for why: that function only toggles when paired
-            // with handlePlayPausePressStart/End, which this bar never wires.
-            onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+            style={{ width: 36, height: 36, color: 'var(--chrome-text)', flexShrink: 0, position: 'relative' }}
+            // Same handlers as the full-width player panel's Play button —
+            // handlePlayPauseClick already falls back to a plain togglePlay()
+            // via its own `view !== 'library'` guard, so long-press-to-jump
+            // only activates here on the narrow Library screen; every other
+            // reuse of this bar (Home, Now Playing's Lyrics tab) is unaffected.
+            onClick={(e) => { e.stopPropagation(); handlePlayPauseClick(e); }}
+            onMouseDown={handlePlayPausePressStart}
+            onMouseUp={handlePlayPausePressEnd}
+            onMouseLeave={handlePlayPausePressEnd}
+            onTouchStart={handlePlayPausePressStart}
+            onTouchEnd={handlePlayPausePressEnd}
           >
+            {isHoldingPlayPause && (
+              <svg width={miniRingSize} height={miniRingSize} viewBox={`0 0 ${miniRingSize} ${miniRingSize}`} style={{ position: 'absolute', top: -4, left: -4, pointerEvents: 'none' }}>
+                <circle
+                  cx={miniRingSize / 2} cy={miniRingSize / 2} r={miniRingRadius}
+                  fill="none"
+                  stroke="#00f2fe"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeDasharray={miniRingCircumference}
+                  strokeDashoffset={miniRingCircumference}
+                  transform={`rotate(-90 ${miniRingSize / 2} ${miniRingSize / 2})`}
+                  className="hold-ring-circle"
+                />
+              </svg>
+            )}
             {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" style={{ marginLeft: 1 }} />}
           </button>
           <button
@@ -1172,15 +1278,9 @@ export default function App() {
   }, []);
 
   const isNowPlayingOpen = view === 'now_playing';
-  const npBackLabel = (() => {
-    if (previousView === 'home' && homeDetailItem) {
-      if (homeDetailItem.type === 'missing-metadata') {
-        return { art: 'Missing Art', year: 'Missing Year', lyrics: 'Missing Lyrics' }[homeDetailItem.key] ?? homeDetailItem.key;
-      }
-      return homeDetailItem.key;
-    }
-    return { library: 'Library', home: 'Home' }[previousView] ?? 'Back';
-  })();
+  const npBackLabel = (previousView === 'home' && homeDetailItem)
+    ? detailItemLabel(homeDetailItem)
+    : ({ library: 'Library', home: 'Home' }[previousView] ?? 'Back');
   const showLibrary = view === 'library' || (isNowPlayingOpen && previousView === 'library');
   showLibraryRef.current = showLibrary;
 
@@ -1319,6 +1419,11 @@ export default function App() {
       getView: () => viewRef.current,
       openDetail: (item) => { setHomeDetailOrigin(null); setView('home'); setHomeDetailItem(item); },
       closeDetail: () => setHomeDetailItem(null),
+      // Seeds useMix's in-memory cache directly, mirroring
+      // __sonusTagEditorTest.openSearchResults — lets the suite drive every
+      // Mix UI state (loading briefly, then ready/empty) without a real
+      // network call. `tracks: []` exercises the empty state.
+      seedMixResult: (seedTrack, tracks) => __setMixCacheForTest(seedTrack, tracks),
     };
     return () => { delete window.__sonusTest; };
   }, []);
@@ -1519,7 +1624,7 @@ export default function App() {
                   density={density}
                   selection={librarySelection}
                   sort={librarySortApi.sort}
-                  playTrack={playTrack}
+                  playTrack={playTrackFresh}
                   togglePlay={togglePlay}
                   onShowMenu={openTrackMenu}
                   onRemoveTracks={removeTracks}
@@ -1542,7 +1647,7 @@ export default function App() {
               library={library}
               currentTrack={currentTrack}
               isPlaying={isPlaying}
-              playTrack={playTrack}
+              playTrack={playTrackFresh}
               playAllTracks={playAllTracks}
               onOpenDetail={openHomeDetail}
               isActive={view === 'home' && !homeDetailItem}
@@ -1554,9 +1659,9 @@ export default function App() {
               library={library}
               currentTrack={currentTrack}
               isPlaying={isPlaying}
-              playTrack={playTrack}
+              playTrack={detailPlayTrack}
               togglePlay={togglePlay}
-              playAllTracks={playAllTracks}
+              playAllTracks={detailPlayAllTracks}
               onShowMenu={openTrackMenu}
               onRemoveTracks={removeTracks}
               density={density}
@@ -1719,6 +1824,23 @@ export default function App() {
                 ) : (
                   /* Song tab */
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    {/* "Playing from" breadcrumb — centered, above the artwork.
+                        Only takes flex-column space when there's actually a
+                        labeled source (Play All/Shuffle from a detail page or a
+                        Home card; plain single-track play or Quick Picks leave
+                        queueSource null, so this renders nothing and the
+                        artwork row below gets the full flex:1 space back). Safe
+                        to size this way — unlike the title block below the
+                        artwork, this sits *above* it, so the artwork's own
+                        drop-shadow (which paints downward onto later siblings)
+                        can never bleed onto it the way it once did below. */}
+                    {queueSource?.label && (
+                      <div style={{ textAlign: 'center', flexShrink: 0, marginBottom: 8, fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+                        Playing from "{queueSource.item ? (
+                          <span className="player-meta-link" onClick={(e) => { e.stopPropagation(); jumpToQueueSource(); }}>{queueSource.label}</span>
+                        ) : queueSource.label}"
+                      </div>
+                    )}
                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 }}>
                       {/* Shrinks to fit whatever space this flex:1/minHeight:0
                           row actually has left (both width AND height), rather
@@ -1827,12 +1949,31 @@ export default function App() {
                 <Mic2 size={20} />
               </button>
             )}
+            {/* "Playing from" breadcrumb — its own centered row below the
+                back-button/lyrics-icon row, above the artwork, same spot as
+                the narrow Song tab's. Unlike narrow, the space for it is
+                reserved unconditionally (paddingTop below is a fixed 80, not
+                conditional on queueSource) rather than only-when-present: this
+                area is built with absolutely-positioned elements, not normal
+                flow, so a conditional paddingTop would make the artwork jump
+                position every time a breadcrumb appears/disappears — a fixed
+                extra ~24px of top margin on a full-width window is the
+                cheaper cost. The --np-scale clamp below is widened by the
+                same amount so the artwork doesn't overflow the smaller
+                remaining height. */}
+            {queueSource?.label && (
+              <div style={{ position: 'absolute', top: 50, left: '50%', transform: 'translateX(-50%)', zIndex: 2, fontSize: 12, color: 'rgba(255,255,255,0.45)', whiteSpace: 'nowrap' }}>
+                Playing from "{queueSource.item ? (
+                  <span className="player-meta-link" onClick={(e) => { e.stopPropagation(); jumpToQueueSource(); }}>{queueSource.label}</span>
+                ) : queueSource.label}"
+              </div>
+            )}
             <div style={{
               position: 'relative', display: 'flex',
               flexDirection: 'row',
               alignItems: 'stretch',
               height: '100%',
-              paddingTop: 56,
+              paddingTop: 80,
               paddingBottom: 24,
               WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale',
             }}>
@@ -1852,9 +1993,12 @@ export default function App() {
                     transition: 'width 0.4s cubic-bezier(0.32, 0.72, 0, 1)',
                     flexShrink: 0,
                     minWidth: 0,
+                    // The 214/124 constants (was 190/100) account for the
+                    // paddingTop above going from 56 to 80 to permanently
+                    // reserve room for the "Playing from" breadcrumb.
                     '--np-scale': isLyricsOpen
-                      ? 'min(calc((100vw - 152px) / 2 - 48px), calc(80vh - 190px), 410px)'
-                      : 'min(calc(100vw - 152px), calc(80vh - 100px), 640px)',
+                      ? 'min(calc((100vw - 152px) / 2 - 48px), calc(80vh - 214px), 410px)'
+                      : 'min(calc(100vw - 152px), calc(80vh - 124px), 640px)',
                   }}>
                     {/* Artwork wrapper — keyed so CSS animations restart on every track change */}
                     <div
@@ -2242,6 +2386,25 @@ export default function App() {
             {trackMenu.filePaths.length === 1 && (
               <>
                 {trackMenu.context === 'tracklist' && <div className="track-dropdown-separator" />}
+                <div
+                  className={cx('track-dropdown-item', { disabled: !(library.find(t => t.filePath === trackMenu.filePaths[0]) ?? (currentTrack?.filePath === trackMenu.filePaths[0] ? currentTrack : null))?.artist })}
+                  onClick={() => {
+                    const fp = trackMenu.filePaths[0];
+                    const track = library.find(t => t.filePath === fp) ?? (currentTrack?.filePath === fp ? currentTrack : null);
+                    if (track?.artist) {
+                      // Same origin-capture as Now Playing's own clickable
+                      // artist/album/year links — "Start Mix" can be
+                      // triggered from Library, Home or Now Playing, and the
+                      // mix's own back-chevron should return there.
+                      setHomeDetailOrigin(view);
+                      setView('home');
+                      setHomeDetailItem({ type: 'mix', key: track.filePath, label: track.title || track.artist });
+                    }
+                    setTrackMenu(null);
+                  }}
+                >
+                  Start Mix
+                </div>
                 <div
                   className={cx('track-dropdown-item', { disabled: !['.mp3', '.flac', '.wav'].some(e => trackMenu.filePaths[0].toLowerCase().endsWith(e)) })}
                   onClick={() => {

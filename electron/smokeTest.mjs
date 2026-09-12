@@ -699,6 +699,30 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     failures.push(`writeTag round-trip error: ${err.stack || err}`);
   }
 
+  // ── Dropping a folder expands into its nested tracks (fs:parseFiles) ──────
+  try {
+    const fixture = path.join(__dirname, '..', 'test-fixture.mp3');
+    const folderRoot = path.join(app.getPath('userData'), 'smoke-drop-folder');
+    await fs.rm(folderRoot, { recursive: true, force: true });
+    await fs.mkdir(path.join(folderRoot, 'Artist A', 'Album 1'), { recursive: true });
+    await fs.mkdir(path.join(folderRoot, 'Artist B'), { recursive: true });
+    await fs.copyFile(fixture, path.join(folderRoot, 'Artist A', 'Album 1', 'song1.mp3'));
+    await fs.copyFile(fixture, path.join(folderRoot, 'Artist B', 'song2.mp3'));
+    await fs.writeFile(path.join(folderRoot, '.DS_Store'), ''); // must be excluded
+
+    const dropResult = await mainWindow.webContents.executeJavaScript(`
+      window.electronAPI.parseFiles([${JSON.stringify(folderRoot)}]).then(tracks =>
+        tracks.map(t => t.filePath.split('/').pop())
+      )
+    `, true);
+    check(dropResult.length === 2, `dropped folder expands recursively into its nested tracks (got ${dropResult.length})`);
+    check(dropResult.includes('song1.mp3') && dropResult.includes('song2.mp3'), `both nested-subfolder tracks found, .DS_Store excluded (${dropResult.join(', ')})`);
+
+    await fs.rm(folderRoot, { recursive: true, force: true });
+  } catch (err) {
+    failures.push(`folder drop expansion error: ${err.stack || err}`);
+  }
+
   // ── WAV + FLAC writer round-trips (real files generated on the fly) ───────
   try {
     // Minimal valid WAV: RIFF/fmt/data, 0.2s of 16-bit mono silence @ 8kHz.
@@ -1502,6 +1526,114 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     }
   } catch (err) {
     failures.push(`frame-time probe error: ${err.stack || err}`);
+  }
+
+  // "Start Mix" — drives the Details screen's async 'mix' item type entirely
+  // through window.__sonusTest.seedMixResult (mirrors
+  // __sonusTagEditorTest.openSearchResults for Search Online), so this never
+  // makes a real call to MusicBrainz/ListenBrainz/Deezer. The matching
+  // pipeline itself (mixMatch.js) is covered by its own unit tests; this
+  // checks the UI wiring — the Details page renders what useMix hands it,
+  // Play All works, and the "Playing from" breadcrumb picks it up.
+  try {
+    // All three need to be real, existing files, not just the one Play All
+    // actually loads into <audio>: the "on window focus, batch-check every
+    // library path and silently remove whatever's missing" effect in
+    // App.jsx doesn't care which track is playing — it validates the whole
+    // library via fs.access and drops anything that fails, and a real
+    // window focus event is entirely plausible mid-suite. match/unrelated
+    // are never played, so a plain copy of the fixture is enough — nothing
+    // ever parses these as audio, only matches their filePath against
+    // fs.access and their title/artist against page text.
+    const fixture = path.join(__dirname, '..', 'test-fixture.mp3');
+    const matchCopy = path.join(app.getPath('userData'), 'smoke-mix-match.mp3');
+    const unrelatedCopy = path.join(app.getPath('userData'), 'smoke-mix-unrelated.mp3');
+    await fs.copyFile(fixture, matchCopy);
+    await fs.copyFile(fixture, unrelatedCopy);
+    const seed = { filePath: fixture, title: 'Mix Seed Song', artist: 'Mix Seed Artist', album: 'A', year: 2020, duration: 180 };
+    const match = { filePath: matchCopy, title: 'Mix Match Song', artist: 'Mix Similar Artist', album: 'B', year: 2019, duration: 200 };
+    const unrelated = { filePath: unrelatedCopy, title: 'Mix Unrelated Song', artist: 'Nobody Similar', album: 'C', year: 2018, duration: 150 };
+
+    await mainWindow.webContents.executeJavaScript(`
+      window.__sonusTest.setLibrary(${JSON.stringify([seed, match, unrelated])});
+      window.__sonusTest.seedMixResult(${JSON.stringify({ artist: seed.artist, title: seed.title })}, ${JSON.stringify([match])});
+      window.__sonusTest.setView('library');
+    `, true);
+    await sleep(150);
+
+    await mainWindow.webContents.executeJavaScript(`
+      window.__sonusTest.openDetail({ type: 'mix', key: ${JSON.stringify(seed.filePath)}, label: ${JSON.stringify(seed.title)} });
+    `, true);
+
+    // Even on a cache hit, useMix's lookup only runs inside its effect — the
+    // very first render still shows its useState initial value ('idle',
+    // rendered as "Finding similar tracks…"), one tick before the effect
+    // resolves it synchronously from the cache. The hero title/kicker render
+    // immediately regardless (they only need item.label, not the fetch), so
+    // waiting on those alone would race the actual tracklist — wait for the
+    // matched track's own title instead, which only ever appears once
+    // useMix has genuinely reached 'ready'.
+    const populated = await waitFor(`
+      (function() {
+        const body = document.body.innerText;
+        return {
+          hasMixKicker: body.includes('MIX'),
+          hasSeed: body.includes(${JSON.stringify(seed.title)}),
+          hasMatch: body.includes(${JSON.stringify(match.title)}),
+          hasUnrelated: body.includes(${JSON.stringify(unrelated.title)}),
+        };
+      })()
+    `, (r) => r.hasMatch, { timeout: 4000 });
+    check(populated.hasMixKicker, 'mix: Details page shows the MIX kicker');
+    check(populated.hasSeed, `mix: Details page shows the seed track's title`);
+    check(populated.hasMatch, 'mix: shows the matched track from the seeded result');
+    check(!populated.hasUnrelated, 'mix: does not show an unrelated library track');
+
+    const playAllClicked = await mainWindow.webContents.executeJavaScript(`
+      (function() {
+        const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Play All');
+        if (!btn || btn.disabled) return false;
+        btn.click();
+        return true;
+      })()
+    `, true);
+    check(playAllClicked, 'mix: Play All is enabled and clickable once results are ready');
+
+    await sleep(300);
+    await mainWindow.webContents.executeJavaScript(`window.__sonusTest.setView('now_playing')`, true);
+    const npBreadcrumb = await waitFor(
+      `document.body.innerText.includes('Playing from')`,
+      (r) => r === true,
+      { timeout: 3000 }
+    );
+    check(npBreadcrumb === true, 'mix: Now Playing shows the "Playing from" breadcrumb after Play All');
+
+    // Empty state: a seeded result of zero tracks, using a second, still-
+    // fake seed track (this one is never played, only opened as a mix, so
+    // it doesn't need to be a real file the way `seed` above does).
+    await mainWindow.webContents.executeJavaScript(`
+      window.__sonusTest.closeDetail();
+      window.__sonusTest.setView('library');
+      window.__sonusTest.seedMixResult(${JSON.stringify({ artist: unrelated.artist, title: unrelated.title })}, []);
+    `, true);
+    await sleep(400);
+    await mainWindow.webContents.executeJavaScript(`
+      window.__sonusTest.openDetail({ type: 'mix', key: ${JSON.stringify(unrelated.filePath)}, label: ${JSON.stringify(unrelated.title)} });
+    `, true);
+    const empty = await waitFor(
+      `document.body.innerText.includes('No similar tracks found in your library yet.')`,
+      (r) => r === true,
+      { timeout: 4000 }
+    );
+    check(empty === true, 'mix: empty result shows the "no similar tracks" state');
+
+    await mainWindow.webContents.executeJavaScript(`
+      window.__sonusTest.closeDetail();
+      window.__sonusTest.setLibrary([]);
+    `, true);
+    await sleep(150);
+  } catch (err) {
+    failures.push(`mix error: ${err.stack || err}`);
   }
 
   // Renderer console errors are failures (ignore benign autoplay policy noise).

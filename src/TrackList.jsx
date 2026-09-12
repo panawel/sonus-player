@@ -87,16 +87,22 @@ export default function TrackList({
   // this). Latest-value-ref idiom: the callbacks close over nothing volatile
   // and read the current values through this ref at call time.
   const latestRef = useRef(null);
-  latestRef.current = { selection, onShowMenu, currentTrack, togglePlay, playTrack };
+  latestRef.current = { selection, onShowMenu, currentTrack, togglePlay, playTrack, tracks };
 
-  const handlePlayToggle = useCallback((track) => {
-    const { currentTrack, togglePlay, playTrack } = latestRef.current;
+  // The trailing (tracks, index) pair lets a caller queue the rest of the
+  // displayed list after the picked track — Library's playTrackFresh just
+  // ignores them (JS drops extra args), but HomeDetailView's playTrack uses
+  // them to continue through the list, same as Play All. See "Playing from"
+  // breadcrumb in docs/ARCHITECTURE.md.
+  const handlePlayToggle = useCallback((track, index) => {
+    const { currentTrack, togglePlay, playTrack, tracks } = latestRef.current;
     if (currentTrack?.filePath === track.filePath) togglePlay();
-    else playTrack(track, false);
+    else playTrack(track, false, tracks, index);
   }, []);
 
-  const handleRowDoubleClick = useCallback((track) => {
-    latestRef.current.playTrack(track, false);
+  const handleRowDoubleClick = useCallback((track, index) => {
+    const { playTrack, tracks } = latestRef.current;
+    playTrack(track, false, tracks, index);
   }, []);
 
   // Guards the contextmenu belt: the contextmenu event that immediately
@@ -142,7 +148,7 @@ export default function TrackList({
       case 'Enter': {
         e.preventDefault();
         const idx = selection.focusedIndex;
-        if (idx != null && tracks[idx]) playTrack(tracks[idx], false);
+        if (idx != null && tracks[idx]) playTrack(tracks[idx], false, tracks, idx);
         break;
       }
       case 'Backspace':

@@ -10,6 +10,7 @@ import { normalizePicture, pictureToDataUrl } from './artwork.mjs';
 import { createIndexStore, diffPaths } from './indexStore.mjs';
 import { sortByFileName } from './launchFiles.mjs';
 import { installFinderServices } from './finderServices.mjs';
+import { expandToFiles } from './folderScan.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -785,28 +786,23 @@ ipcMain.handle('fs:readFiles', async () => {
 
     if (result.canceled) return [];
 
-    const allFiles = [];
-    for (const p of result.filePaths) {
-      const stat = await fs.stat(p);
-      if (stat.isDirectory()) {
-        const files = await fs.readdir(p);
-        allFiles.push(...files.map(f => path.join(p, f)));
-      } else {
-        allFiles.push(p);
-      }
-    }
-
-    const audioFiles = allFiles.filter(f => SUPPORTED_EXTS.includes(path.extname(f).toLowerCase()));
-    return await parseFilePaths(audioFiles);
+    const allFiles = await expandToFiles(result.filePaths);
+    return await parseFilePaths(allFiles);
   } catch (err) {
     console.error('Error reading files:', err);
     return [];
   }
 });
 
+// Also handles a directory among filePaths — dropping a folder onto the
+// window (see App.jsx's handleDrop) resolves to its real path via
+// webUtils.getPathForFile the same way a dropped file does, so it arrives
+// here indistinguishable from any other path; expandToFiles is what turns it
+// into the tracks inside it (recursively — see folderScan.mjs).
 ipcMain.handle('fs:parseFiles', async (event, filePaths) => {
   try {
-    return await parseFilePaths(filePaths);
+    const allFiles = await expandToFiles(filePaths);
+    return await parseFilePaths(allFiles);
   } catch (err) {
     console.error('Error parsing dragged files:', err);
     return [];

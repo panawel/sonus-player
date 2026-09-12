@@ -74,7 +74,7 @@ describe('TrackRow', () => {
   it('double-click plays', () => {
     const { props } = renderRow();
     fireEvent.doubleClick(screen.getByText('Digital Love'));
-    expect(props.onRowDoubleClick).toHaveBeenCalledWith(track);
+    expect(props.onRowDoubleClick).toHaveBeenCalledWith(track, 4);
   });
 
   it('right-click opens the menu at the cursor', () => {
@@ -100,7 +100,7 @@ describe('TrackRow', () => {
     const { container, props } = renderRow({ isCurrent: true, isPlaying: true });
     const overlay = container.querySelectorAll('.eq-bar')[0].parentElement;
     fireEvent.click(overlay);
-    expect(props.onPlayToggle).toHaveBeenCalledWith(track);
+    expect(props.onPlayToggle).toHaveBeenCalledWith(track, 4);
     expect(props.onRowClick).not.toHaveBeenCalled();
   });
 
