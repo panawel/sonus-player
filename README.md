@@ -99,6 +99,7 @@ The window isn't locked to one desktop shape — it resizes all the way down to 
 <p>
 <img src="docs/assets/narrow-home.png" alt="Home at phone-portrait width" width="300">
 <img src="docs/assets/narrow-library.png" alt="Library at phone-portrait width" width="300">
+<img src="docs/assets/artist-narrow.png" alt="Artist detail view at phone-portrait width" width="300">
 <img src="docs/assets/narrow-now-playing.png" alt="Now Playing at phone-portrait width" width="300">
 </p>
 
