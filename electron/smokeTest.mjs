@@ -253,16 +253,19 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         // The condition must be FALSE before the transition. Waiting on
         // '.track-row' alone is not: the Library's own rows are still mounted,
         // so the loop exits on the first iteration and samples the DOM before
-        // HomeDetailView has rendered. 'Play All' exists only in the detail
-        // view, so it is the honest marker for "the swap actually happened".
+        // HomeDetailView has rendered. '.detail-play-button' (the hero's white
+        // Play pill, see HomeDetailView.jsx) exists only in the detail view,
+        // so it is the honest marker for "the swap actually happened" — a
+        // class selector, not text, since HomeView has its own unrelated
+        // "Play"/"Shuffle" buttons that plain text-matching would collide with.
         window.__sonusTest.openDetail({ type: 'artist', key: 'Artist 1' });
         const detailReady = () =>
-          [...document.querySelectorAll('button')].some(b => b.textContent.includes('Play All'))
+          !!document.querySelector('.detail-play-button')
           && document.querySelectorAll('.track-row').length > 0;
         for (let i = 0; i < 120 && !detailReady(); i++) await sleep(50);
         out.detailRows = document.querySelectorAll('.track-row').length;
         out.detailHeader = !!document.querySelector('.track-list-header');
-        out.detailHasPlayAll = [...document.querySelectorAll('button')].some(b => b.textContent.includes('Play All'));
+        out.detailHasPlayAll = !!document.querySelector('.detail-play-button');
         window.__sonusTest.closeDetail();
         window.__sonusTest.setView('library');
         await sleep(150);
@@ -286,7 +289,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       check(uiResult.selectedCount === 1, `ArrowDown selects one row (${uiResult.selectedCount})`);
       check(uiResult.detailRows > 0 && uiResult.detailRows <= 60, `detail view renders bounded rows (${uiResult.detailRows})`);
       check(uiResult.detailHeader, 'detail view has sortable header');
-      check(uiResult.detailHasPlayAll, 'detail view hero intact (Play All present)');
+      check(uiResult.detailHasPlayAll, 'detail view hero intact (Play button present)');
     }
   } catch (err) {
     failures.push(`tracklist UI test error: ${err.stack || err}`);
@@ -1534,9 +1537,9 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
   // makes a real call to MusicBrainz/ListenBrainz/Deezer. The matching
   // pipeline itself (mixMatch.js) is covered by its own unit tests; this
   // checks the UI wiring — the Details page renders what useMix hands it,
-  // Play All works, and the "Playing from" breadcrumb picks it up.
+  // Play works, and the "Playing from" breadcrumb picks it up.
   try {
-    // All three need to be real, existing files, not just the one Play All
+    // All three need to be real, existing files, not just the one Play
     // actually loads into <audio>: the "on window focus, batch-check every
     // library path and silently remove whatever's missing" effect in
     // App.jsx doesn't care which track is playing — it validates the whole
@@ -1591,13 +1594,13 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
 
     const playAllClicked = await mainWindow.webContents.executeJavaScript(`
       (function() {
-        const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Play All');
+        const btn = document.querySelector('.detail-play-button');
         if (!btn || btn.disabled) return false;
         btn.click();
         return true;
       })()
     `, true);
-    check(playAllClicked, 'mix: Play All is enabled and clickable once results are ready');
+    check(playAllClicked, 'mix: Play is enabled and clickable once results are ready');
 
     await sleep(300);
     await mainWindow.webContents.executeJavaScript(`window.__sonusTest.setView('now_playing')`, true);
@@ -1606,7 +1609,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       (r) => r === true,
       { timeout: 3000 }
     );
-    check(npBreadcrumb === true, 'mix: Now Playing shows the "Playing from" breadcrumb after Play All');
+    check(npBreadcrumb === true, 'mix: Now Playing shows the "Playing from" breadcrumb after Play');
 
     // Empty state: a seeded result of zero tracks, using a second, still-
     // fake seed track (this one is never played, only opened as a mix, so

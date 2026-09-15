@@ -121,75 +121,49 @@ textarea::placeholder {
   transform: scale(0.97);
 }
 
+/* Home detail page's Play button — a deliberate one-off white pill (see
+   HomeDetailView.jsx), not the app's usual accent-color-for-primary-action
+   convention. Hover/press feedback only, matching .glass-button's own
+   convention, just scale-based since a solid white fill has no natural
+   "highlight" tint to shift to. */
+/* Same detail hero: the back button reuses Now Playing's .np-back-button
+   (built for "a back button over artwork") but with a stronger fill — the
+   base 5% white fill vanishes over a busy photo, which is what this sits on.
+   The shuffle button gets the same frosted treatment so it doesn't read as a
+   bare glyph floating on the image (the reference's own round translucent
+   button); .player-control-button still supplies its shape/hover. */
+.np-back-button.np-back-button--strong {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+.np-back-button.np-back-button--strong:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+.detail-shuffle-button {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  backdrop-filter: blur(20px);
+}
+.detail-shuffle-button:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.detail-play-button {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.detail-play-button:hover {
+  transform: scale(1.03);
+}
+.detail-play-button:active {
+  transform: scale(0.97);
+}
+
 /* Generic spinner — used by the Tag Editor's Search Online popup. */
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 .spin {
   animation: spin 0.9s linear infinite;
-}
-
-@keyframes volume-slider-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-.volume-slider {
-  width: 80px;
-  height: 18px;
-}
-
-/* Vertical volume popup: pops up flush above the mute button (zero gap —
-   see App.jsx's volume hover group comment for why the gap must be zero).
-   .volume-popup-track is a small glass pill behind the rotated track,
-   matching the app's other glassmorphic surfaces rather than a bare slider
-   floating over whatever content happens to be underneath.
-   z-index: 7 is load-bearing — the seek bar's wrapper (App.jsx) has an
-   explicit zIndex: 6 and a negative marginTop that extends its own hover
-   zone upward into the content area above the panel; that strip overlaps
-   this popup's upper portion. Without a higher z-index here, the seek bar
-   wins the local stacking comparison (both are z-indexed siblings within
-   the same player-panel stacking context) and silently eats hover/pointer
-   events in that overlap band, breaking the popup exactly like the gap bug
-   this design otherwise avoids — confirmed live via CDP hit-testing. */
-.volume-popup {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 7;
-  padding-bottom: 10px;
-  animation: volume-slider-in 0.15s ease-out;
-}
-.volume-popup-track {
-  width: 18px;
-  height: 90px;
-  border-radius: 10px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-/* CSS transform is render-only and doesn't resize the input's own layout
-   box, so width/height here stay in the *unrotated* frame (width becomes
-   the visual height post-rotation) — Chromium correctly inverse-transforms
-   pointer coordinates for dragging, so this is a reliable, well-established
-   technique for vertical range inputs, not just a visual trick. */
-input[type="range"].volume-slider--vertical {
-  width: 74px;
-  height: 18px;
-  transform: rotate(-90deg);
-}
-
-input[type="range"].volume-slider::-webkit-slider-thumb {
-  opacity: 1;
-  transform: scale(1);
-}
-
-input[type="range"].volume-slider:hover::-webkit-slider-thumb {
-  transform: scale(1.2);
 }
 
 /* Bare glyph, no circle/fill — see App.jsx controlAccent for the tint color. */
@@ -249,6 +223,132 @@ input[type="range"].volume-slider:hover::-webkit-slider-thumb {
 }
 .player-artwork:hover::after {
   opacity: 1;
+}
+
+/* Full-width Now Playing pill — dark glass matching the rest of the app's own
+   glass language (--chrome-text/--chrome-text-dim, the same pair Now
+   Playing's own transport controls use — see docs/ARCHITECTURE.md's "Player
+   pill" section). Originally a deliberately light/inverted theme with its own
+   --pill-icon/--pill-icon-dim pair; flipped to dark + white icons at the
+   user's request once full-width Now Playing grew its own white-icon
+   controls and the two started visibly clashing. */
+.player-pill {
+  /* 0.45 black: composited (WCAG relative-luminance formula) against the
+     worst realistic case this pill can float over — a blurred, near-white
+     album cover tile in Home's artwork grid — a pure-white backdrop still
+     only gets diluted to begin with, so the scrim has to do the rest of the
+     darkening itself. At 0.45 that worst case still holds white-icon
+     contrast at ~3:1; every less extreme case behind this pill (which is
+     almost always Sonus's own dark chrome) does dramatically better. This
+     is the mirror image of the previous light version's own 0.45 (there,
+     0.45 white was the floor against a worst-case dark backdrop) — same
+     number, opposite color, same reasoning: don't nudge it lower without
+     redoing this math. The strong blur below still matters for the same
+     reason as before: it's what turns sharp content behind (row text,
+     artwork edges) into one blended average tone instead of patchy
+     contrast. */
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(64px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  /* Drop shadow (elevation) + a faint 1px inset top highlight — a real glass
+     surface catches ambient light along its top edge; this is what actually
+     reads as "glass" rather than just "a translucent dark box." Much
+     fainter than the light version's own 0.8 highlight — a strong white rim
+     on a dark pill reads as a chrome bevel, not a glass edge. */
+  box-shadow:
+    0 16px 44px rgba(0, 0, 0, 0.32),
+    0 2px 8px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: box-shadow 0.2s ease;
+}
+
+/* Whole-capsule hover/press feedback — pure CSS, same convention as
+   .skip-btn/.play-pause-btn's own hover/active states, just applied to the
+   pill as a single object rather than its individual buttons. Shadow-only,
+   deliberately no transform/movement (an earlier lift+scale version was
+   tried and the user didn't like the motion) — just enough visual weight
+   change to register as "this is a distinct floating object," not a lift. */
+.player-pill:hover {
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.36),
+    0 3px 10px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.player-pill:active {
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.28),
+    0 1px 4px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Bubble appear/disappear (App.jsx/PlayerPill.jsx keep the pill mounted
+   through both, driving these via a phase state machine rather than
+   mount/unmount, since an unmounted node can't animate). The "back-out"
+   cubic-bezier alone produces the overshoot/bounce — no need for a 3-keyframe
+   animation. Durations here must match ENTER_MS/EXIT_MS in PlayerPill.jsx.
+   Every step keeps `translateX(-50%)` alongside the scale — the wrapper's own
+   inline style uses that translate to stay centered (`left: 50%` alone only
+   puts its *left edge* at center), and a CSS animation's `transform` value
+   REPLACES the inline style outright rather than merging with it. Dropping
+   the -50% here for just `scale(...)` was the original bug: mid-animation
+   the pill lost its centering translate entirely and sat off to the right,
+   then snapped back the instant the animation's class was removed and the
+   inline style's own translateX(-50%) took back over — "jumps right, then
+   back," not a bounce. */
+@keyframes player-pill-bubble-in {
+  from { opacity: 0; transform: translateX(-50%) scale(0.8); }
+  to   { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+@keyframes player-pill-bubble-out {
+  from { opacity: 1; transform: translateX(-50%) scale(1); }
+  to   { opacity: 0; transform: translateX(-50%) scale(0.85); }
+}
+.player-pill-wrapper--entering {
+  animation: player-pill-bubble-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.player-pill-wrapper--exiting {
+  animation: player-pill-bubble-out 0.3s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+/* Trims every round icon-button's hit-circle down toward the 36px play-pause/
+   artwork size (was 12px padding => a 44px circle for the 20px skip icons,
+   the tallest element in the row) so the main row can hug 36px instead of
+   44px. Icon glyph sizes (the actual PLAY_PAUSE_SIZE/CONTROL_ICON_SIZE/etc.
+   constants in PlayerPill.jsx) are untouched — only this chrome padding
+   shrinks, per an explicit user request to flatten the pill without shrinking
+   any content. */
+.player-pill .player-control-button {
+  padding: 9px;
+}
+
+/* Seek line along the pill's bottom edge — same hover-thicken/drag-to-seek
+   interaction convention as .top-progress-bar, but a fully separate class
+   (not reusing .top-progress-bar/.wow-slider) so it can't inherit any of
+   those rules' dark-theme colors. */
+input[type="range"].pill-seek-bar {
+  height: 2px;
+  display: block;
+}
+input[type="range"].pill-seek-bar::-webkit-slider-runnable-track {
+  height: 2px;
+  background: linear-gradient(to right, var(--accent-color) 0%, var(--accent-color) var(--progress, 0%), rgba(0, 0, 0, 0.12) var(--progress, 0%));
+  transition: height 0.15s ease, background 0.2s ease;
+}
+input[type="range"].pill-seek-bar--hovered,
+input[type="range"].pill-seek-bar--hovered::-webkit-slider-runnable-track {
+  height: 5px;
+}
+input[type="range"].pill-seek-bar::-webkit-slider-thumb {
+  opacity: 1;
+  transform: scale(1);
+  height: 9px;
+  width: 9px;
+  margin-top: -3.5px;
+  background: var(--accent-color);
+  box-shadow: none;
+}
+input[type="range"].pill-seek-bar--hovered::-webkit-slider-thumb {
+  transform: scale(1.3);
 }
 
 .tag-artwork {

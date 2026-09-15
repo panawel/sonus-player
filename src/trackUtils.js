@@ -105,6 +105,13 @@ export const ULTRA_COMPACT_PANEL_BREAKPOINT = 780;
 export const LIBRARY_YEAR_COL_BREAKPOINT = 900;
 export const LIBRARY_GENRE_COL_BREAKPOINT = 1000;
 
+// The phone-portrait/full-width split — moved here (from App.jsx, where it
+// originally lived alone) once HomeDetailView.jsx also needed to know it,
+// for its own narrow-vs-full-width hero layout. Same reasoning as the three
+// breakpoints above: one shared number both files import, rather than a
+// second hardcoded 560 that could silently drift from App.jsx's own.
+export const NARROW_LAYOUT_BREAKPOINT = 560;
+
 // 0..3 — how many of an ordered extra-columns list currently fit, given the
 // three width tiers above. Each wider threshold implies the narrower ones,
 // so this is a plain cascade rather than three independent checks.

@@ -38,6 +38,7 @@ export default function TrackList({
   extraColumns = null,          // Library-only: LIBRARY_EXTRA_COLUMNS slice, see trackUtils.js / TrackRow.jsx
   initialOffset = 0,          // restored scroll position (Details view)
   emptyState = null,          // replaces the default "No tracks found." block
+  bottomPadding = 0,          // extra space after the last row (e.g. clearance for the floating player pill) — see the comment on paddingEnd below for why this can't just be CSS padding on the scroll container
 }) {
   const containerRef = useRef(null);
   const rowsRef = useRef(null);
@@ -71,6 +72,15 @@ export default function TrackList({
     overscan: 10,
     scrollMargin,
     initialOffset,
+    // Confirmed live: plain CSS padding-bottom on the scroll container is
+    // silently ignored when its overflowing content comes from a
+    // height:100%-bound wrapper around this virtualizer's rows (the wrapper's
+    // own declared box, not the rows' real overflowed height, is what the
+    // browser measures for that container's scrollHeight) — forcing the
+    // padding to 900px produced a 0px change in scrollHeight. paddingEnd
+    // bakes the extra space into the virtualizer's own getTotalSize()
+    // instead, which is what actually determines scrollHeight here.
+    paddingEnd: bottomPadding,
   });
   if (virtualizerRef) virtualizerRef.current = rowVirtualizer;
 

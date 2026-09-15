@@ -1,44 +1,48 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, ChevronDown, MoreVertical, Plus, Search, X, Volume2, Volume1, VolumeX, Home, Mic2 } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, ChevronDown, MoreVertical, Plus, Search, X, Home, Mic2 } from 'lucide-react';
 import { FastAverageColor } from 'fast-average-color';
 import { arrayMove } from '@dnd-kit/sortable';
 import TrackList from './TrackList.jsx';
 import TrackListHeader from './TrackListHeader.jsx';
 import { useTrackSelection } from './useTrackSelection.js';
 import { useTrackSort } from './useTrackSort.js';
-import { useMeasuredWidth } from './useMeasuredWidth.js';
 import { useIsNarrow } from './useIsNarrow.js';
 import HomeView from './HomeView';
 import HomeDetailView from './HomeDetailView';
+import PlayerPill, { PLAYER_PILL_TOTAL_HEIGHT, PLAYER_PILL_BOTTOM_MARGIN } from './PlayerPill.jsx';
+import PlayerPillNarrow, { PLAYER_PILL_NARROW_TOTAL_HEIGHT, PLAYER_PILL_NARROW_BOTTOM_MARGIN } from './PlayerPillNarrow.jsx';
 import cx from 'classnames';
 import { splitArtists, isRTL } from './audioUtils.js';
 import { __setMixCacheForTest } from './useMix.js';
 import {
-  LIBRARY_EXTRA_COLUMNS, ULTRA_COMPACT_PANEL_BREAKPOINT,
+  LIBRARY_EXTRA_COLUMNS, ULTRA_COMPACT_PANEL_BREAKPOINT, NARROW_LAYOUT_BREAKPOINT,
   LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT, extraColumnFitCount,
 } from './trackUtils.js';
 import './index.css';
 
-// Below this, Player Panel controls (Skip/Play/volume/repeat/shuffle) shrink
-// to give the centered artwork+title block more room — see centerBlockStyle.
-const COMPACT_PANEL_BREAKPOINT = 900;
-// Below this (narrower still — near the window's minWidth), the left cluster
-// restructures from a single row into a stacked column (time label above the
-// transport buttons) and the center artwork shrinks, freeing enough room for
-// the title/subtitle to stay legible. A second, narrower tier than
-// COMPACT_PANEL_BREAKPOINT so icon-shrinking alone still happens first.
-// (Imported from trackUtils.js, not defined here — HomeDetailView.jsx reuses
-// the exact same value for its own extra-columns cascade, see below.)
-// Below this, the whole app shell restructures into a single-column,
-// phone-portrait layout: the nav pill (Home/Library/Add) drops to icon-only,
-// the player panel collapses to a mini bar (artwork + title/artist + Play
-// only), and Now Playing switches from its side-by-side Song/Lyrics split to
-// a single full-screen tab view. A strict subset of ULTRA_COMPACT_PANEL_BREAKPOINT, so
-// the icon-shrink tiers above still apply unchanged in the 560-900px range —
-// this tier is checked first and branches to different JSX entirely.
-const NARROW_LAYOUT_BREAKPOINT = 560;
-// Mini-player bar height in narrow mode (vs. the full panel's 124).
-const NARROW_PLAYER_PANEL_HEIGHT = 72;
+// ULTRA_COMPACT_PANEL_BREAKPOINT and NARROW_LAYOUT_BREAKPOINT (imported from
+// trackUtils.js, not defined here) are still used below — the former for
+// Library's extra-columns cascade (HomeDetailView.jsx reuses the exact same
+// value for its own cascade, so the two can never drift), the latter for the
+// narrow/full-width split (HomeDetailView.jsx also subscribes to it now, for
+// its own narrow-vs-full-width hero layout).
+// Below NARROW_LAYOUT_BREAKPOINT, the whole app shell restructures into a
+// single-column, phone-portrait layout: the nav pill (Home/Library/Add) drops
+// to icon-only, the player panel collapses to a mini bar (artwork +
+// title/artist + Play only), and Now Playing switches from its side-by-side
+// Song/Lyrics split to a single full-screen tab view. A strict subset of
+// ULTRA_COMPACT_PANEL_BREAKPOINT (narrow is always also ultra-compact, never
+// the reverse) — this tier is checked first and branches to different JSX
+// entirely.
+// Full-width scrollable content (Library/Home/HomeDetailView) needs this much
+// bottom clearance so its last rows don't sit underneath the floating pill —
+// pill height + its own bottom margin + a little breathing room above it.
+const PLAYER_PILL_CLEARANCE = PLAYER_PILL_TOTAL_HEIGHT + PLAYER_PILL_BOTTOM_MARGIN + 16;
+// Same idea, narrow's own pill (PlayerPillNarrow.jsx) — used by Library/Home
+// and narrow Now Playing's own Lyrics tab, both of which float PlayerPillNarrow
+// above their scrollable content now instead of docking a mini-player bar in
+// normal layout flow.
+const NARROW_PILL_CLEARANCE = PLAYER_PILL_NARROW_TOTAL_HEIGHT + PLAYER_PILL_NARROW_BOTTOM_MARGIN + 16;
 
 // Library's extra columns (Album/Year/Genre) drop off one at a time, right to
 // left, as the window narrows. Breakpoints/rationale live in trackUtils.js
@@ -72,10 +76,6 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [isShuffle, setIsShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState('off'); // 'off', 'all', 'one'
-  const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVolumeOpen, setIsVolumeOpen] = useState(false);
-  const prevVolumeRef = useRef(1);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [bgColor, setBgColor] = useState('transparent');
@@ -167,16 +167,6 @@ export default function App() {
   const [playerSubtitleDist, setPlayerSubtitleDist] = useState(0);
   const [playerTitleDuration, setPlayerTitleDuration] = useState('8s');
   const [playerSubtitleDuration, setPlayerSubtitleDuration] = useState('8s');
-  // Real measured widths of the two Player Panel control clusters — the
-  // centered artwork+title block's position/size is derived from these
-  // (centerBlockStyle below) instead of hardcoded pixel constants, so it
-  // stays correct regardless of window width, time-label digit count, or the
-  // volume slider opening.
-  const leftClusterRef = useRef(null);
-  const rightClusterRef = useRef(null);
-  const leftClusterWidth = useMeasuredWidth(leftClusterRef);
-  const rightClusterWidth = useMeasuredWidth(rightClusterRef);
-  const isCompactPanel = useIsNarrow(COMPACT_PANEL_BREAKPOINT);
   const isUltraCompactPanel = useIsNarrow(ULTRA_COMPACT_PANEL_BREAKPOINT);
   const isNarrowLayout = useIsNarrow(NARROW_LAYOUT_BREAKPOINT);
   // How many of LIBRARY_EXTRA_COLUMNS currently fit; the Album cutoff reuses
@@ -186,32 +176,6 @@ export default function App() {
   const visibleLibraryExtraColumns = LIBRARY_EXTRA_COLUMNS.slice(
     0, extraColumnFitCount(isUltraCompactPanel, isLibraryYearColHidden, isLibraryGenreColHidden)
   );
-  // Center the block within the true gap between the two clusters (not the
-  // whole row — they're rarely equal width, so naive 50% centering drifts
-  // into whichever side is wider), and cap its width to whatever's actually
-  // left over. No artificial floor: if there's truly no room, it shrinks
-  // toward 0 rather than a fixed size that could overlap either cluster.
-  const centerBlockStyle = React.useMemo(() => {
-    const offset = (leftClusterWidth - rightClusterWidth) / 2;
-    const reserved = leftClusterWidth + rightClusterWidth + 48 /* row padding */ + 32 /* breathing room */;
-    return {
-      left: `calc(50% + ${offset}px)`,
-      maxWidth: `max(0px, calc(100% - ${reserved}px))`,
-    };
-  }, [leftClusterWidth, rightClusterWidth]);
-  const playPauseSize = isCompactPanel ? 52 : 64;
-  const playPauseIconSize = isCompactPanel ? 26 : 32;
-  const playPauseMargin = isUltraCompactPanel ? 4 : (isCompactPanel ? 8 : 14);
-  const controlIconSize = isCompactPanel ? 22 : 28;
-  const secondaryIconSize = isCompactPanel ? 18 : 22;
-  // Overrides .player-control-button's padding:12px (index.css) only on the
-  // two Skip buttons, only when ultra-compact — that class is shared by the
-  // volume/repeat/shuffle/⋮ buttons too, which must stay untouched.
-  const skipBtnPadding = isUltraCompactPanel ? 6 : 12;
-  const playerArtworkSize = isUltraCompactPanel ? 56 : 80;
-  const playerArtworkIconSize = isUltraCompactPanel ? 22 : 34;
-  const playerArtworkIconMargin = isUltraCompactPanel ? 17 : 23;
-  const centerBlockGap = isUltraCompactPanel ? 10 : 16;
   // Soft edge fade for scrolling title/subtitle text, same WebkitMaskImage/
   // maskImage technique HomeView uses for its card-row edges — applied only
   // while that text is actually overflowing (see playerTitleDist/playerSubtitleDist below).
@@ -222,9 +186,6 @@ export default function App() {
   // truthy — a whitespace-only artist value is truthy but splitArtists()
   // filters it to zero tokens, which used to leave a dangling bullet.
   const playerArtistTokens = currentTrack?.artist ? splitArtists(currentTrack.artist) : [];
-  const holdRingSize = playPauseSize + 8;
-  const holdRingRadius = holdRingSize / 2 - 2;
-  const holdRingCircumference = 2 * Math.PI * holdRingRadius;
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
@@ -1010,13 +971,11 @@ export default function App() {
   };
 
   // Narrow Now Playing's transport row (shuffle/prev/play/next/repeat) reuses
-  // the exact same handlers/state as the desktop player panel — it just can't
-  // reuse the desktop panel's JSX directly, since there shuffle/repeat live in
-  // a separate cluster from prev/play/next (alongside volume), and that
-  // existing grouping must stay untouched at full width. Sizes are passed in
-  // rather than shared with isCompactPanel/isUltraCompactPanel, since this row
-  // has the full screen width available instead of sharing space with other
-  // clusters.
+  // the exact same handlers/state as PlayerPill.jsx's own identically-grouped
+  // row — it just can't reuse PlayerPill's JSX directly, since this one needs
+  // different sizes (it has the full screen width to itself, not a compact
+  // capsule) and the dark chrome-text color scheme instead of the pill's
+  // light one. Sizes are passed in explicitly for that reason.
   const renderTransportControls = ({ playSize, playIconSize, playMargin, controlSize, secondarySize }) => {
     const ringSize = playSize + 8;
     const ringRadius = ringSize / 2 - 2;
@@ -1068,99 +1027,6 @@ export default function App() {
         </button>
       </div>
     );
-  };
-
-  // Shared mini-player bar (artwork + title/artist + Play) — used both as the
-  // docked bar in Library/Home (narrow mode) and, in narrow Now Playing's
-  // Lyrics tab, as a way to see/control playback without switching back to
-  // the Song tab. Only what tapping the bar does differs between the two.
-  const miniRingSize = 36 + 8;
-  const miniRingRadius = miniRingSize / 2 - 2;
-  const miniRingCircumference = 2 * Math.PI * miniRingRadius;
-
-  const renderMiniPlayerBar = (onBarClick) => (
-    <div className="clickable" onClick={onBarClick} style={{ height: NARROW_PLAYER_PANEL_HEIGHT, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', background: 'var(--glass-panel)', backdropFilter: 'blur(40px)', cursor: 'default', zIndex: 6, flexShrink: 0 }}>
-      {currentTrack ? (
-        <>
-          <div className="player-artwork" style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--glass-border)', overflow: 'hidden', flexShrink: 0 }}>
-            {currentTrack.thumb ? <img src={currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={20} style={{ margin: 12 }} color="var(--text-secondary)" />}
-          </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--chrome-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.title}</div>
-            <div style={{ fontSize: 12, color: 'var(--chrome-text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.artist || ''}</div>
-          </div>
-          <button
-            className="clickable player-control-button"
-            style={{ padding: 6, color: 'var(--chrome-text)', flexShrink: 0 }}
-            onClick={(e) => { e.stopPropagation(); playPrev(); }}
-          >
-            <SkipBack size={18} fill="currentColor" />
-          </button>
-          <button
-            className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
-            style={{ width: 36, height: 36, color: 'var(--chrome-text)', flexShrink: 0, position: 'relative' }}
-            // Same handlers as the full-width player panel's Play button —
-            // handlePlayPauseClick already falls back to a plain togglePlay()
-            // via its own `view !== 'library'` guard, so long-press-to-jump
-            // only activates here on the narrow Library screen; every other
-            // reuse of this bar (Home, Now Playing's Lyrics tab) is unaffected.
-            onClick={(e) => { e.stopPropagation(); handlePlayPauseClick(e); }}
-            onMouseDown={handlePlayPausePressStart}
-            onMouseUp={handlePlayPausePressEnd}
-            onMouseLeave={handlePlayPausePressEnd}
-            onTouchStart={handlePlayPausePressStart}
-            onTouchEnd={handlePlayPausePressEnd}
-          >
-            {isHoldingPlayPause && (
-              <svg width={miniRingSize} height={miniRingSize} viewBox={`0 0 ${miniRingSize} ${miniRingSize}`} style={{ position: 'absolute', top: -4, left: -4, pointerEvents: 'none' }}>
-                <circle
-                  cx={miniRingSize / 2} cy={miniRingSize / 2} r={miniRingRadius}
-                  fill="none"
-                  stroke="#00f2fe"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeDasharray={miniRingCircumference}
-                  strokeDashoffset={miniRingCircumference}
-                  transform={`rotate(-90 ${miniRingSize / 2} ${miniRingSize / 2})`}
-                  className="hold-ring-circle"
-                />
-              </svg>
-            )}
-            {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" style={{ marginLeft: 1 }} />}
-          </button>
-          <button
-            className="clickable player-control-button"
-            style={{ padding: 6, color: 'var(--chrome-text)', flexShrink: 0 }}
-            onClick={(e) => { e.stopPropagation(); playNext(false); }}
-          >
-            <SkipForward size={18} fill="currentColor" />
-          </button>
-        </>
-      ) : (
-        <span style={{ color: 'var(--chrome-text-dim)', fontSize: 13 }}>Nothing playing</span>
-      )}
-    </div>
-  );
-
-  const handleVolumeChange = (e) => {
-    const val = parseFloat(e.target.value);
-    setVolume(val);
-    if (val > 0) setIsMuted(false);
-    else setIsMuted(true);
-    if (audioRef.current) audioRef.current.volume = val;
-  };
-
-  const toggleMute = () => {
-    if (isMuted) {
-      const restored = prevVolumeRef.current > 0 ? prevVolumeRef.current : 1;
-      setVolume(restored);
-      setIsMuted(false);
-      if (audioRef.current) audioRef.current.volume = restored;
-    } else {
-      prevVolumeRef.current = volume;
-      setIsMuted(true);
-      if (audioRef.current) audioRef.current.volume = 0;
-    }
   };
 
   const expandNowPlaying = () => {
@@ -1361,10 +1227,6 @@ export default function App() {
     if (lyricsScrollRef.current) lyricsScrollRef.current.scrollTop = 0;
     playRecordedRef.current = false;
   }, [currentTrack?.filePath]);
-
-  React.useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = isMuted ? 0 : volume;
-  }, [currentTrack]);
 
   // Nav-pill search segment — auto-focus the instant it opens.
   React.useEffect(() => {
@@ -1581,8 +1443,69 @@ export default function App() {
             // No top padding for Library: the header block above the scroller
             // already supplies it, and rows should start immediately under the
             // rule. Home and the detail views keep the original 32px (16px in
-            // narrow mode, where every pixel of width is precious).
-            padding: showLibrary ? (isNarrowLayout ? '0 16px 16px' : '0 32px 32px') : (isNarrowLayout ? 16 : 32),
+            // narrow mode, where every pixel of width is precious). Home's own
+            // bottom padding also adds the appropriate floating-pill clearance
+            // (PLAYER_PILL_CLEARANCE full-width, NARROW_PILL_CLEARANCE narrow —
+            // both pills float now, so both widths need it) so its card rows
+            // don't sit underneath it — Library gets its own clearance a
+            // different way (TrackList's bottomPadding / paddingEnd prop, see
+            // App.jsx's <TrackList> call and the comment in TrackList.jsx):
+            // plain CSS padding-bottom here is confirmed to do nothing for
+            // Library specifically, since its overflow comes from TrackList's
+            // virtualizer inside a height:100% wrapper, a combination this
+            // container's own padding doesn't get added to.
+            //
+            // Zero padding on EVERY side specifically when a Home detail page
+            // is open (view==='home' && homeDetailItem) — including bottom,
+            // which briefly still carried pill clearance here and caused a
+            // second, related bug. Top/left/right were zeroed first: a real
+            // bug, found live: HomeDetailView's own full-bleed hero used to
+            // escape padding via a negative margin, which looks correct by
+            // getBoundingClientRect() (that only reports an element's own
+            // layout box) but is silently clipped in practice. This
+            // container is overflow-y:'auto' — a genuine scroll port, not
+            // just static overflow:hidden — and per the CSS overflow spec,
+            // setting overflow-y to anything but visible forces overflow-x
+            // to also become non-visible; worse, for an actual *scrolling*
+            // container specifically (not simple clipping), content pulled
+            // above/before the scroll origin via negative margin can never
+            // be scrolled into view, because scrollTop/scrollLeft can't go
+            // negative — so it's not just clipped, it's permanently
+            // unreachable. Confirmed via `elementFromPoint()` + real pixel
+            // sampling (not bounding rects, which is exactly how this went
+            // unnoticed through several rounds of "verified flush" — same
+            // blind spot as the rounded-corner and native-traffic-light
+            // bugs, a third distinct cause). The fix is to remove what the
+            // hero needs to escape instead of fighting the scroll port:
+            // zero padding here, and HomeDetailView adds its own padding
+            // back around just the tracklist (not the hero).
+            //
+            // Bottom was left carrying pill clearance a while longer — it
+            // looked harmless, unlike top/left/right, since HomeDetailView's
+            // own top-level wrapper is height:'100%' with overflow:'hidden',
+            // so nothing could visibly bleed past it the way the hero did.
+            // But percentage heights resolve against the *content* box, i.e.
+            // after this container's own padding is subtracted — so that
+            // bottom padding was silently shrinking HomeDetailView's entire
+            // available height by the clearance amount, on top of the SAME
+            // clearance HomeDetailView already reserves itself, internally,
+            // via TrackList's own bottomPadding (the exact mechanism Library
+            // uses, see below) — a double reservation. Net effect, confirmed
+            // live via geometry (not just bounding rects): HomeDetailView's
+            // own internal tracklist scroll box ended ~120px short of the
+            // window's true bottom edge, well above where the floating pill
+            // actually sits, instead of extending flush to the bottom and
+            // letting rows slide underneath the pill the way Library's own
+            // single, un-nested scroll container does. Zeroing it here (now
+            // matching the other three sides) removes the duplicate; the one
+            // remaining reservation — TrackList's bottomPadding, already
+            // wired via HomeDetailView's own bottomClearance prop — is the
+            // sole source of clearance, exactly like Library.
+            padding: showLibrary
+              ? (isNarrowLayout ? '0 16px 16px' : '0 32px 32px')
+              : (view === 'home' && homeDetailItem)
+                ? '0'
+                : (isNarrowLayout ? `16px 16px ${16 + NARROW_PILL_CLEARANCE}px` : `32px 32px ${32 + PLAYER_PILL_CLEARANCE}px`),
             overflowY: 'auto',
             // Reserve the scrollbar gutter on Library so the header above (which
             // is outside this scroller) can compensate with a fixed 6px rather
@@ -1634,6 +1557,7 @@ export default function App() {
                   virtualizerRef={rowVirtualizerRef}
                   showAlbum={false}
                   extraColumns={visibleLibraryExtraColumns}
+                  bottomPadding={isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE}
                 />
               )}
             </div>
@@ -1677,6 +1601,7 @@ export default function App() {
               }}
               savedScrollTop={homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] ?? 0}
               onScrollChange={(pos) => { homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] = pos; }}
+              bottomClearance={isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE}
             />
           )}
 
@@ -1701,11 +1626,16 @@ export default function App() {
         <div
           style={{
             position: 'absolute', top: 0, left: 0, right: 0,
-            // Narrow mode: Now Playing is a full dedicated screen (matching the
-            // reference), so it covers all the way down — the mini-player bar
-            // below is unrendered while NP is open, rather than staying docked
-            // underneath it the way the full-width player panel always does.
-            bottom: isNarrowLayout ? 0 : 124,
+            // Full height in both modes: both pills (PlayerPill.jsx full-width,
+            // PlayerPillNarrow.jsx narrow) are position:fixed overlays that
+            // float above this area entirely on their own — their z-index (6)
+            // over this overlay's (5) is what keeps them on top, not this box
+            // stopping short of the bottom edge the way it had to back when
+            // the full-width pill was still a real docked panel. This matters
+            // even while NP is open: PlayerPillNarrow specifically stays
+            // visible over the Lyrics tab (its own shouldShow folds in
+            // isLyricsOpen), floating above this same box.
+            bottom: 0,
             pointerEvents: isNowPlayingOpen ? 'auto' : 'none',
             zIndex: 5,
             WebkitAppRegion: 'no-drag',
@@ -1800,27 +1730,21 @@ export default function App() {
                      Gated on currentTrack.lyrics too (not just isLyricsOpen) so a
                      track change to one with no lyrics falls back to the Song tab
                      automatically, matching the now-hidden tab label above.
-                     Includes the same mini-player bar Library uses (below), so
-                     there's still a way to see/control playback while reading
-                     lyrics instead of the screen being lyrics-only. Tapping it
-                     switches back to the Song tab, rather than expandNowPlaying
-                     (Library's version) — we're already in Now Playing here. */
-                  <>
-                    <div ref={lyricsScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
-                      {currentTrack.lyrics ? (
-                        <div style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--chrome-text)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--chrome-text-dim)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
-                      )}
-                    </div>
-                    {/* Negative margins cancel this wrapper's own padding so the
-                        bar spans full width and sits flush at the bottom, same
-                        as Library's — the NP overlay's own clip-path already
-                        rounds whatever reaches its edges, so no radius needed here. */}
-                    <div style={{ margin: '8px -20px -24px' }}>
-                      {renderMiniPlayerBar(() => setIsLyricsOpen(false))}
-                    </div>
-                  </>
+                     PlayerPillNarrow (rendered once, below, as a position:fixed
+                     sibling of this whole overlay) stays visible here — its own
+                     shouldShow folds in isLyricsOpen specifically so there's still
+                     a way to see/control playback while reading lyrics, instead of
+                     hiding the way it does on the Song tab (which has its own
+                     embedded transport controls already). Extra bottom padding on
+                     this scroll container keeps the last lines of a long lyric from
+                     sitting underneath that floating pill. */
+                  <div ref={lyricsScrollRef} style={{ flex: 1, overflowY: 'auto', padding: `8px 4px ${NARROW_PILL_CLEARANCE}px` }}>
+                    {currentTrack.lyrics ? (
+                      <div style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--chrome-text)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--chrome-text-dim)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
+                    )}
+                  </div>
                 ) : (
                   /* Song tab */
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -1949,18 +1873,34 @@ export default function App() {
                 <Mic2 size={20} />
               </button>
             )}
+            {/* Track menu (3-dot) — same top row as the back button, mirrored
+                to the right, same as narrow's own top bar. This was the
+                pill's job before the pill started hiding while Now Playing is
+                open; full-width NP needs its own now that it's self-contained
+                (see "Player pill" in docs/ARCHITECTURE.md). */}
+            {currentTrack && (
+              <button
+                className="player-control-button clickable"
+                style={{ position: 'absolute', top: 10, right: 10, zIndex: 2, color: 'var(--chrome-text)' }}
+                onClick={(e) => { e.stopPropagation(); if (trackMenu) { setTrackMenu(null); return; } setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' }); }}
+              >
+                <MoreVertical size={20} />
+              </button>
+            )}
             {/* "Playing from" breadcrumb — its own centered row below the
                 back-button/lyrics-icon row, above the artwork, same spot as
-                the narrow Song tab's. Unlike narrow, the space for it is
-                reserved unconditionally (paddingTop below is a fixed 80, not
-                conditional on queueSource) rather than only-when-present: this
-                area is built with absolutely-positioned elements, not normal
-                flow, so a conditional paddingTop would make the artwork jump
-                position every time a breadcrumb appears/disappears — a fixed
-                extra ~24px of top margin on a full-width window is the
-                cheaper cost. The --np-scale clamp below is widened by the
-                same amount so the artwork doesn't overflow the smaller
-                remaining height. */}
+                the narrow Song tab's. The space for it is reserved
+                unconditionally (paddingTop below is a fixed 80, not
+                conditional on queueSource) rather than only-when-present:
+                this row's siblings are absolutely positioned, not normal
+                flow, so a conditional paddingTop would shift them every time
+                a breadcrumb appears/disappears — a fixed extra ~24px of top
+                margin on a full-width window is the cheaper cost. The
+                artwork column below doesn't need any matching adjustment
+                here (unlike when this comment was first written) — it's
+                flex:1 now, not a hand-computed height budget, so it just
+                fills whatever's left under whatever paddingTop turns out to
+                be, automatically. */}
             {queueSource?.label && (
               <div style={{ position: 'absolute', top: 50, left: '50%', transform: 'translateX(-50%)', zIndex: 2, fontSize: 12, color: 'rgba(255,255,255,0.45)', whiteSpace: 'nowrap' }}>
                 Playing from "{queueSource.item ? (
@@ -1984,53 +1924,164 @@ export default function App() {
                  </div>
               ) : (
                 <>
-                  {/* Left column: artwork + text */}
+                  {/* Left column: artwork + text. Artwork is flex:1 (fills
+                      whatever height the controls block below doesn't need)
+                      rather than a hand-computed calc(80vh - Npx) budget —
+                      self-adjusting, so it never needs re-tuning again when
+                      something below it changes size, unlike the previous
+                      approach (which needed a new constant three times:
+                      breadcrumb, then the transport row, then bigger sizes
+                      for this pass). */}
                   <div style={{
                     position: 'relative',
                     display: 'flex', flexDirection: 'column',
-                    alignItems: 'center', justifyContent: 'center',
+                    alignItems: 'center',
                     width: isLyricsOpen ? '50%' : '100%',
+                    height: '100%',
                     transition: 'width 0.4s cubic-bezier(0.32, 0.72, 0, 1)',
                     flexShrink: 0,
                     minWidth: 0,
-                    // The 214/124 constants (was 190/100) account for the
-                    // paddingTop above going from 56 to 80 to permanently
-                    // reserve room for the "Playing from" breadcrumb.
-                    '--np-scale': isLyricsOpen
-                      ? 'min(calc((100vw - 152px) / 2 - 48px), calc(80vh - 214px), 410px)'
-                      : 'min(calc(100vw - 152px), calc(80vh - 124px), 640px)',
                   }}>
-                    {/* Artwork wrapper — keyed so CSS animations restart on every track change */}
-                    <div
-                      key={currentTrack.filePath}
-                      className={cx('np-artwork', { 'np-artwork-paused': !isPlaying })}
-                      style={{ position: 'relative', width: 'clamp(160px, var(--np-scale), 640px)', flexShrink: 0, marginBottom: 0 }}
-                    >
-                      {/* Ambient color glow radiating from behind the artwork */}
-                      {artworkRgb && (
+                    {/* Artwork area — flex:1 fills the space the controls
+                        block below doesn't take, and centers the actual
+                        square artwork card within it. Sizing the square uses
+                        CSS container queries (container-type: size on this
+                        wrapper, `min(100cqw, 100cqh)` on the artwork below) —
+                        NOT `width:100%; maxHeight:100%; aspectRatio:1/1`,
+                        which looks like the obvious approach but is wrong:
+                        confirmed live it renders a non-square rectangle,
+                        because `width:100%` is a definite value and CSS only
+                        recomputes width from a clamped height via
+                        aspect-ratio when width was `auto` to begin with — an
+                        explicit 100% never gets revisited once maxHeight
+                        clips the height, so you get "capped height, uncapped
+                        width" instead of a shrunk square. Container query
+                        units don't have that problem: cqw/cqh are literally
+                        1% of this container's own width/height, so
+                        `min(100cqw, 100cqh)` is exactly "whichever of my
+                        container's own width or height is smaller," applied
+                        equally to both dimensions of the square. maxWidth is
+                        a taste ceiling (don't let it get cartoonishly large
+                        on an ultrawide monitor), not a layout requirement. */}
+                    <div style={{ flex: 1, minHeight: 0, minWidth: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 32px', containerType: 'size' }}>
+                      {/* Artwork wrapper — keyed so CSS animations restart on every track change */}
+                      <div
+                        key={currentTrack.filePath}
+                        className={cx('np-artwork', { 'np-artwork-paused': !isPlaying })}
+                        style={{ position: 'relative', width: 'min(100cqw, 100cqh, 820px)', aspectRatio: '1 / 1' }}
+                      >
+                        {/* Ambient color glow radiating from behind the artwork */}
+                        {artworkRgb && (
+                          <div style={{
+                            position: 'absolute', inset: '-35%', borderRadius: '50%',
+                            filter: 'blur(70px)',
+                            background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.5)`,
+                            zIndex: 0, pointerEvents: 'none', transition: 'background 0.5s ease',
+                          }} />
+                        )}
+                        {/* Artwork card */}
                         <div style={{
-                          position: 'absolute', inset: '-35%', borderRadius: '50%',
-                          filter: 'blur(70px)',
-                          background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.5)`,
-                          zIndex: 0, pointerEvents: 'none', transition: 'background 0.5s ease',
-                        }} />
-                      )}
-                      {/* Artwork card */}
-                      <div style={{
-                        position: 'relative', zIndex: 1, width: '100%', aspectRatio: '1 / 1',
-                        borderRadius: 24, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)',
-                        boxShadow: artworkRgb
-                          ? `0 32px 80px rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.5), 0 8px 32px rgba(0,0,0,0.8), 0 2px 8px rgba(0,0,0,0.5)`
-                          : '0 32px 80px rgba(0,0,0,0.6), 0 8px 32px rgba(0,0,0,0.8)',
-                      }}>
-                        {(npArtwork || currentTrack.thumb) ? (
-                          <img src={npArtwork || currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                        ) : (
-                          <div style={{ width: '100%', height: '100%', background: 'var(--glass-active)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Music style={{ width: 'clamp(50px, calc(var(--np-scale) * 0.30), 196px)', height: 'clamp(50px, calc(var(--np-scale) * 0.30), 196px)' }} color="var(--text-secondary)" />
+                          position: 'relative', zIndex: 1, width: '100%', height: '100%',
+                          borderRadius: 24, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)',
+                          boxShadow: artworkRgb
+                            ? `0 32px 80px rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.5), 0 8px 32px rgba(0,0,0,0.8), 0 2px 8px rgba(0,0,0,0.5)`
+                            : '0 32px 80px rgba(0,0,0,0.6), 0 8px 32px rgba(0,0,0,0.8)',
+                        }}>
+                          {(npArtwork || currentTrack.thumb) ? (
+                            <img src={npArtwork || currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', background: 'var(--glass-active)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Music style={{ width: '30%', height: '30%' }} color="var(--text-secondary)" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Full-width Now Playing's own built-in controls — title/
+                        artist, seek bar, transport row — matching narrow's Song
+                        tab, just bigger and reusing full-width's own
+                        mouse-hover seek interaction (isSeekHovered/hoverTime,
+                        already shared App.jsx state — the same one the pill
+                        used before it hides here) instead of narrow's
+                        always-on touch styling. flexShrink: 0 and anchored at
+                        the bottom of the column (the artwork area above takes
+                        all the flexible space, so this just naturally sits at
+                        the end) — deliberately NOT part of the same centered
+                        group as the artwork; that was the whole point of this
+                        pass, the two used to be centered together as one
+                        block instead of the artwork filling available space
+                        with controls docked below it. Its own width is capped
+                        independently of the artwork's (up to 820px) — matching
+                        the artwork's clamp exactly would make the seek bar/
+                        title stretch absurdly wide on a big screen, the same
+                        reason narrow caps its own block at 420 despite having
+                        a much bigger screen than 420px to work with. Replaces
+                        relying on the floating pill entirely — the pill hides
+                        while Now Playing is open (PlayerPill.jsx), so this is
+                        the only transport surface here now. */}
+                    <div style={{ width: 'min(100%, 640px)', flexShrink: 0, marginTop: 32, paddingBottom: 8 }}>
+                      <div style={{ textAlign: 'center', marginBottom: 22, position: 'relative', zIndex: 2 }}>
+                        <div style={{ fontSize: 32, fontWeight: 800, marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--chrome-text)' }}>{currentTrack.title}</div>
+                        <div style={{ fontSize: 18, color: 'var(--chrome-text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {playerArtistTokens.map((token, i) => (
+                            <span key={`${i}:${token}`}>
+                              {i > 0 && ' & '}
+                              <span className="player-meta-link" onClick={(e) => { e.stopPropagation(); setHomeDetailOrigin(view); setView('home'); setHomeDetailItem({ type: 'artist', key: token }); }}>{token}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div
+                        style={{ position: 'relative', height: 20, marginBottom: 26 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!duration) return;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                          const time = pct * duration;
+                          setCurrentTime(time);
+                          if (audioRef.current) audioRef.current.currentTime = time;
+                        }}
+                        onMouseMove={(e) => {
+                          if (!duration) return;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                          setHoverTime(pct * duration);
+                        }}
+                        onMouseEnter={() => setIsSeekHovered(true)}
+                        onMouseLeave={() => { setIsSeekHovered(false); setHoverTime(null); }}
+                      >
+                        <input
+                          type="range" min="0" max={duration || 100}
+                          value={isSeeking ? seekValue : currentTime}
+                          onChange={handleSeekChange}
+                          onMouseDown={handleSeekMouseDown}
+                          onMouseUp={handleSeekMouseUp}
+                          onTouchStart={handleSeekMouseDown}
+                          onTouchEnd={handleSeekMouseUp}
+                          onClick={(e) => e.stopPropagation()}
+                          className={cx('clickable top-progress-bar wow-slider', { 'top-progress-bar--hovered': isSeekHovered || isSeeking })}
+                          style={{ position: 'absolute', top: 9, left: 0, right: 0, '--progress': `${duration ? ((isSeeking ? seekValue : currentTime) / duration) * 100 : 0}%` }}
+                        />
+                        {(isSeeking || (isSeekHovered && hoverTime !== null)) && duration > 0 && (
+                          <div style={{
+                            position: 'absolute', bottom: '100%', marginBottom: 6,
+                            left: `${(isSeeking ? seekValue : hoverTime) / (duration || 1) * 100}%`, transform: 'translateX(-50%)',
+                            background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 11, fontWeight: 500,
+                            padding: '2px 6px', borderRadius: 4, pointerEvents: 'none', whiteSpace: 'nowrap',
+                          }}>
+                            {formatTime(isSeeking ? seekValue : hoverTime)}
                           </div>
                         )}
+                        <div style={{ position: 'absolute', top: 15, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--chrome-text-dim)', fontVariantNumeric: 'tabular-nums', pointerEvents: 'none' }}>
+                          <span>{formatTime(isSeeking ? seekValue : currentTime)}</span>
+                          <span>{formatTime(duration)}</span>
+                        </div>
                       </div>
+
+                      {renderTransportControls({ playSize: 96, playIconSize: 42, playMargin: 28, controlSize: 36, secondarySize: 28 })}
                     </div>
                   </div>
                   {/* Lyrics panel — outer: transitions width */}
@@ -2068,220 +2119,87 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mini-player (narrow mode, Now Playing closed): artwork + title/artist
-            + Play only — full transport controls live in narrow Now Playing
-            instead (see the NP branch above). Hidden while NP is open so it
-            doesn't show underneath NP's now full-screen overlay. Tapping it
-            opens Now Playing, same as the full desktop panel does. */}
-        {isNarrowLayout && !isNowPlayingOpen && renderMiniPlayerBar(expandNowPlaying)}
-
-        {/* Bottom Player Controls — full width only, byte-identical to before. */}
-        {!isNarrowLayout && (
-        <div
-          className="clickable"
-          onClick={isNowPlayingOpen ? collapseNowPlaying : expandNowPlaying}
-          style={{ height: 124, position: 'relative', display: 'flex', flexDirection: 'column', background: 'var(--glass-panel)', backdropFilter: 'blur(40px)', cursor: 'default', zIndex: 6 }}
-        >
-          {/* Full-width seek bar — replaces the old borderTop */}
-          <div
-            style={{ position: 'relative', width: '100%', flexShrink: 0, height: 24, marginTop: -8, paddingTop: 8, zIndex: 6 }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!duration) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-              const time = pct * duration;
-              setCurrentTime(time);
-              if (audioRef.current) audioRef.current.currentTime = time;
-            }}
-            onMouseMove={(e) => {
-              if (!duration) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-              setHoverTime(pct * duration);
-            }}
-            onMouseEnter={() => setIsSeekHovered(true)}
-            onMouseLeave={() => { setIsSeekHovered(false); setHoverTime(null); }}
-          >
-            <input
-              type="range"
-              min="0"
-              max={duration || 100}
-              value={isSeeking ? seekValue : currentTime}
-              onChange={handleSeekChange}
-              onMouseDown={handleSeekMouseDown}
-              onMouseUp={handleSeekMouseUp}
-              onTouchStart={handleSeekMouseDown}
-              onTouchEnd={handleSeekMouseUp}
-              className={cx("clickable top-progress-bar wow-slider", { 'top-progress-bar--hovered': isSeekHovered || isSeeking })}
-              style={{ '--progress': `${duration ? ((isSeeking ? seekValue : currentTime) / duration) * 100 : 0}%` }}
-            />
-            {(isSeeking || (isSeekHovered && hoverTime !== null)) && duration > 0 && (
-              <div style={{
-                position: 'absolute',
-                bottom: 'calc(100% + 4px)',
-                left: `${(isSeeking ? seekValue : hoverTime) / (duration || 1) * 100}%`,
-                transform: 'translateX(-50%)',
-                background: 'rgba(0,0,0,0.75)',
-                color: '#fff',
-                fontSize: 11,
-                fontWeight: 500,
-                padding: '2px 6px',
-                borderRadius: 4,
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
-                zIndex: 10,
-              }}>
-                {formatTime(isSeeking ? seekValue : hoverTime)}
-              </div>
-            )}
-          </div>
-
-
-          {/* Controls row */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, padding: '0 24px', position: 'relative' }}>
-           <div ref={leftClusterRef} style={{ display: 'flex', alignItems: 'center', flexDirection: isUltraCompactPanel ? 'column' : 'row', gap: isUltraCompactPanel ? 4 : 0 }}>
-              {isUltraCompactPanel && (
-                <span style={{ fontSize: 13, color: 'var(--chrome-text-dim)', fontVariantNumeric: 'tabular-nums', pointerEvents: 'none' }}>
-                  {formatTime(isSeeking ? seekValue : currentTime)} / {formatTime(duration)}
-                </span>
-              )}
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)', padding: skipBtnPadding }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
-                  <SkipBack size={controlIconSize} fill="currentColor" />
-                </button>
-                <button
-                  className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
-                  style={{ width: playPauseSize, height: playPauseSize, color: 'var(--chrome-text)', margin: `0 ${playPauseMargin}px`, position: 'relative' }}
-                  onClick={(e) => { e.stopPropagation(); handlePlayPauseClick(e); }}
-                  onMouseDown={handlePlayPausePressStart}
-                  onMouseUp={handlePlayPausePressEnd}
-                  onMouseLeave={handlePlayPausePressEnd}
-                  onTouchStart={handlePlayPausePressStart}
-                  onTouchEnd={handlePlayPausePressEnd}
-                >
-                  {isHoldingPlayPause && (
-                    <svg width={holdRingSize} height={holdRingSize} viewBox={`0 0 ${holdRingSize} ${holdRingSize}`} style={{ position: 'absolute', top: -4, left: -4, pointerEvents: 'none' }}>
-                      <circle
-                        cx={holdRingSize / 2} cy={holdRingSize / 2} r={holdRingRadius}
-                        fill="none"
-                        stroke="#00f2fe"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeDasharray={holdRingCircumference}
-                        strokeDashoffset={holdRingCircumference}
-                        transform={`rotate(-90 ${holdRingSize / 2} ${holdRingSize / 2})`}
-                        className="hold-ring-circle"
-                      />
-                    </svg>
-                  )}
-                  {isPlaying ? (
-                    <Pause size={playPauseIconSize} fill="currentColor" />
-                  ) : (
-                    <Play size={playPauseIconSize} fill="currentColor" style={{ marginLeft: 2 }} />
-                  )}
-                </button>
-                <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)', padding: skipBtnPadding }} onClick={(e) => { e.stopPropagation(); playNext(false); }}>
-                  <SkipForward size={controlIconSize} fill="currentColor" />
-                </button>
-              </div>
-              {!isUltraCompactPanel && (
-                <span style={{ fontSize: 13, color: 'var(--chrome-text-dim)', fontVariantNumeric: 'tabular-nums', marginLeft: 12, flexShrink: 0, pointerEvents: 'none' }}>
-                  {formatTime(isSeeking ? seekValue : currentTime)} / {formatTime(duration)}
-                </span>
-              )}
-           </div>
-
-           {currentTrack && (
-             <div style={{ position: 'absolute', left: centerBlockStyle.left, transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: centerBlockGap, maxWidth: centerBlockStyle.maxWidth, overflow: 'hidden', pointerEvents: 'none' }}>
-               <div
-                 className="player-artwork"
-                 style={{ width: playerArtworkSize, height: playerArtworkSize, borderRadius: 12, background: 'var(--glass-border)', overflow: 'hidden', cursor: 'pointer', flexShrink: 0, pointerEvents: 'auto' }}
-               >
-                 {currentTrack.thumb ? <img src={currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={playerArtworkIconSize} style={{ margin: playerArtworkIconMargin }} color="var(--text-secondary)" />}
-               </div>
-               <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, flex: 1, gap: 4, pointerEvents: 'auto' }}>
-                 <div ref={playerTitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontWeight: 700, fontSize: 20, color: 'var(--chrome-text)', lineHeight: 1.2, WebkitMaskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined }}>
-                   <span className={playerTitleDist > 0 ? 'marquee-scroll' : undefined} style={{ display: 'inline-block', '--marquee-distance': `${playerTitleDist}px`, '--marquee-duration': playerTitleDuration }}>
-                     {currentTrack.title}
-                   </span>
-                 </div>
-                 <div ref={playerSubtitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontSize: 15, color: 'var(--chrome-text-dim)', lineHeight: 1.2, WebkitMaskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined }}>
-                   <span className={playerSubtitleDist > 0 ? 'marquee-scroll' : undefined} style={{ display: 'inline-block', '--marquee-distance': `${playerSubtitleDist}px`, '--marquee-duration': playerSubtitleDuration }}>
-                     {playerArtistTokens.map((token, i) => (
-                       // Index-qualified key: duplicate keys corrupt React's keyed
-                       // reconciliation (stale artist text survived track changes).
-                       <span key={`${i}:${token}`}>
-                         {i > 0 && ' & '}
-                         <span className="player-meta-link" onClick={(e) => { e.stopPropagation(); setHomeDetailOrigin(view); setView('home'); setHomeDetailItem({ type: 'artist', key: token }); }}>{token}</span>
-                       </span>
-                     ))}
-                     {playerArtistTokens.length > 0 && currentTrack.album && ' • '}
-                     {currentTrack.album && <span className="player-meta-link" onClick={(e) => { e.stopPropagation(); setHomeDetailOrigin(view); setView('home'); setHomeDetailItem({ type: 'album', key: currentTrack.album }); }}>{currentTrack.album}</span>}
-                     {(playerArtistTokens.length > 0 || currentTrack.album) && currentTrack.year && ' • '}
-                     {currentTrack.year && <span className="player-meta-link" onClick={(e) => { e.stopPropagation(); setHomeDetailOrigin(view); setView('home'); setHomeDetailItem({ type: 'year', key: String(currentTrack.year) }); }}>{currentTrack.year}</span>}
-                   </span>
-                 </div>
-               </div>
-               <button
-                 className="player-control-button clickable"
-                 style={{ color: 'var(--chrome-text)', flexShrink: 0, pointerEvents: 'auto' }}
-                 onClick={(e) => { e.stopPropagation(); if (trackMenu) { setTrackMenu(null); return; } setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' }); }}
-               >
-                 <MoreVertical size={22} />
-               </button>
-             </div>
-           )}
-
-           <div style={{ width: '30%', display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-             {/* Inner auto-width wrapper is the actual measurement target — the
-                 outer 30%-wide div never changes size regardless of content
-                 (e.g. the volume slider opening), so a ref on it can't detect that. */}
-             <div ref={rightClusterRef} style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{ position: 'relative', display: 'flex', alignItems: 'center' }}
-                onMouseEnter={() => setIsVolumeOpen(true)}
-                onMouseLeave={() => setIsVolumeOpen(false)}
-              >
-                {isVolumeOpen && (
-                  // Popup is a DOM descendant of this same hover-listening div,
-                  // flush against the button below with zero gap (see index.css's
-                  // .volume-popup comment) — that's what actually avoids the
-                  // mouseleave-through-a-gap bug the earlier pill attempt hit.
-                  <div className="volume-popup">
-                    <div className="volume-popup-track">
-                      <input
-                        type="range"
-                        min="0" max="1" step="0.01"
-                        value={isMuted ? 0 : volume}
-                        onChange={handleVolumeChange}
-                        className="clickable volume-slider volume-slider--vertical wow-slider"
-                        style={{ '--progress': `${(isMuted ? 0 : volume) * 100}%` }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </div>
-                  </div>
-                )}
-                <button
-                  className="player-control-button clickable"
-                  style={{ color: 'var(--chrome-text)' }}
-                  onClick={(e) => { e.stopPropagation(); toggleMute(); }}
-                >
-                  {isMuted || volume === 0 ? <VolumeX size={secondaryIconSize} /> : volume < 0.5 ? <Volume1 size={secondaryIconSize} /> : <Volume2 size={secondaryIconSize} />}
-                </button>
-              </div>
-              <button className={cx("player-control-button clickable")} style={{ color: repeatMode !== 'off' ? 'var(--accent-color)' : 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
-                {repeatMode === 'one' ? <Repeat1 size={secondaryIconSize} /> : <Repeat size={secondaryIconSize} />}
-              </button>
-              <button className={cx("player-control-button clickable")} style={{ color: isShuffle ? 'var(--accent-color)' : 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
-                <Shuffle size={secondaryIconSize} />
-              </button>
-             </div>
-           </div>
-          </div>
-        </div>
-        )}
       </div>
+
+      {/* Full-width Now Playing pill — a floating capsule, not part of the
+          content card's own flex layout (position:fixed, rendered as its
+          sibling below) so it can float above Library/Home/HomeDetailView's
+          scrolled content and above Now Playing itself. See
+          docs/ARCHITECTURE.md's "Player pill" section. */}
+      {!isNarrowLayout && (
+        <PlayerPill
+          currentTrack={currentTrack}
+          isNowPlayingOpen={isNowPlayingOpen}
+          isPlaying={isPlaying}
+          currentTime={currentTime}
+          duration={duration}
+          isSeeking={isSeeking}
+          seekValue={seekValue}
+          isSeekHovered={isSeekHovered}
+          hoverTime={hoverTime}
+          isShuffle={isShuffle}
+          onToggleShuffle={() => setIsShuffle(!isShuffle)}
+          repeatMode={repeatMode}
+          onToggleRepeat={toggleRepeat}
+          isHoldingPlayPause={isHoldingPlayPause}
+          playPrev={playPrev}
+          playNext={playNext}
+          onPlayPauseClick={handlePlayPauseClick}
+          onPlayPausePressStart={handlePlayPausePressStart}
+          onPlayPausePressEnd={handlePlayPausePressEnd}
+          playerArtistTokens={playerArtistTokens}
+          playerTitleWrapRef={playerTitleWrapRef}
+          playerSubtitleWrapRef={playerSubtitleWrapRef}
+          playerTitleDist={playerTitleDist}
+          playerSubtitleDist={playerSubtitleDist}
+          playerTitleDuration={playerTitleDuration}
+          playerSubtitleDuration={playerSubtitleDuration}
+          marqueeFadeMask={marqueeFadeMask}
+          onNavigateMeta={(type, key) => { setHomeDetailOrigin(view); setView('home'); setHomeDetailItem({ type, key }); }}
+          onOpenMenu={(e) => { if (trackMenu) { setTrackMenu(null); return; } setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' }); }}
+          onSeekChange={handleSeekChange}
+          onSeekMouseDown={handleSeekMouseDown}
+          onSeekMouseUp={handleSeekMouseUp}
+          onSeekMouseEnter={() => setIsSeekHovered(true)}
+          onSeekMouseLeave={() => { setIsSeekHovered(false); setHoverTime(null); }}
+          onSeekBarClick={(time) => { setCurrentTime(time); if (audioRef.current) audioRef.current.currentTime = time; }}
+          onSeekHoverMove={(time) => setHoverTime(time)}
+          formatTime={formatTime}
+          onExpandCollapseNP={isNowPlayingOpen ? collapseNowPlaying : expandNowPlaying}
+          artworkRgb={artworkRgb}
+        />
+      )}
+
+      {/* Narrow's own floating pill — replaces the old docked mini-player bar
+          entirely (both its call sites: Library/Home, and narrow Now
+          Playing's own Lyrics tab). One instance covers both, since it's a
+          position:fixed sibling here rather than something rendered inline
+          inside either screen's own layout — its own shouldShow (inside
+          PlayerPillNarrow) folds in isLyricsOpen so it stays visible on the
+          Lyrics tab and hides on the Song tab, which has its own embedded
+          transport controls already. Tapping it: if Now Playing isn't open,
+          open it (same as the desktop pill); if it is open, we're
+          necessarily on the Lyrics tab (the only state where NP is open and
+          this pill still shows), so switch back to the Song tab instead of
+          re-collapsing NP entirely — this mirrors what tapping the old
+          docked bar did in each of its two spots, now expressed as one
+          branch instead of two separate onBarClick callbacks at two call
+          sites. See docs/ARCHITECTURE.md's "Player pill" section. */}
+      {isNarrowLayout && (
+        <PlayerPillNarrow
+          currentTrack={currentTrack}
+          isNowPlayingOpen={isNowPlayingOpen}
+          isLyricsOpen={isLyricsOpen}
+          isPlaying={isPlaying}
+          isHoldingPlayPause={isHoldingPlayPause}
+          playNext={playNext}
+          onPlayPauseClick={handlePlayPauseClick}
+          onPlayPausePressStart={handlePlayPausePressStart}
+          onPlayPausePressEnd={handlePlayPausePressEnd}
+          onTap={() => { if (isNowPlayingOpen) setIsLyricsOpen(false); else expandNowPlaying(); }}
+          artworkRgb={artworkRgb}
+        />
+      )}
 
       {currentTrack && (
         <audio
@@ -2349,7 +2267,7 @@ export default function App() {
       {/* Custom dropdown — track list 3-dots and Now Playing ⋮ */}
       {toast && (
         <div style={{
-          position: 'fixed', bottom: isNarrowLayout ? NARROW_PLAYER_PANEL_HEIGHT + 16 : 140, left: '50%', transform: 'translateX(-50%)',
+          position: 'fixed', bottom: isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE, left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(24,24,28,0.95)', backdropFilter: 'blur(20px)',
           color: 'var(--text-primary)', padding: '10px 18px', borderRadius: 10,
           fontSize: 13, fontWeight: 500, zIndex: 2000,
