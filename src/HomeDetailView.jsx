@@ -8,7 +8,7 @@ import { useIsNarrow } from './useIsNarrow.js';
 import { useMix } from './useMix.js';
 import {
   ULTRA_COMPACT_PANEL_BREAKPOINT, LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT,
-  NARROW_LAYOUT_BREAKPOINT, extraColumnFitCount, detailExtraColumns,
+  NARROW_LAYOUT_BREAKPOINT, extraColumnFitCount, detailExtraColumns, trackMatchesQuery,
 } from './trackUtils.js';
 
 const MISSING_TITLES = { art: 'Missing Art', year: 'Missing Year', lyrics: 'Missing Lyrics' };
@@ -60,8 +60,10 @@ const HERO_FADE_WIDE = 200;
 // Full-width's second, functional fade — a fixed depth from the bottom, deep
 // enough to sit behind the whole eyebrow/title/subtitle/button text block
 // (including a 2-line title) plus real margin. See heroMask's own comment
-// for why full-width needs this at all when narrow doesn't.
-const HERO_TEXT_FADE_WIDE = 240;
+// for why full-width needs this at all when narrow doesn't. 300 (was 240):
+// the block now sits bottomClearance (89px) up from the bottom instead of 32,
+// 57px taller overall, and the fade has to keep covering all of it.
+const HERO_TEXT_FADE_WIDE = 300;
 
 function formatDuration(sec) {
   const h = Math.floor(sec / 3600);
@@ -70,7 +72,7 @@ function formatDuration(sec) {
   return `${m}m`;
 }
 
-export default function HomeDetailView({ item, library, currentTrack, isPlaying, playTrack, togglePlay, playAllTracks, onShowMenu, onRemoveTracks, onBack, backLabel = 'Home', savedScrollTop = 0, onScrollChange, density, onDensityChange, selectionRegistryRef, bottomClearance = 0 }) {
+export default function HomeDetailView({ item, library, currentTrack, isPlaying, playTrack, togglePlay, playAllTracks, onShowMenu, onRemoveTracks, onBack, backLabel = 'Home', savedScrollTop = 0, onScrollChange, density, onDensityChange, selectionRegistryRef, bottomClearance = 0, searchQuery = '', onTracksChange }) {
   // Same extra-columns mechanism Library uses (App.jsx), just with a
   // per-page-type filter first — see detailExtraColumns in trackUtils.js for
   // which column gets suppressed on which page (e.g. no Album column on an
@@ -129,8 +131,22 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
 
   const innerScrollRef = useRef(null);
 
+  // Report this page's full track list upward, so the search panel (App.jsx /
+  // SearchPanel.jsx) can scope itself to this page.
+  useEffect(() => { onTracksChange?.(tracks); }, [tracks, onTracksChange]);
+
+  // The search panel's text (App.jsx / SearchPanel.jsx) live-filters THIS
+  // page's tracks. Only the list is filtered: everything describing the page
+  // itself — the track count and duration in the subtitle, the hero artwork,
+  // whether Play/Shuffle are enabled — keeps reading from the full `tracks`.
+  const searching = searchQuery.trim() !== '';
+  const listTracks = useMemo(
+    () => (searching ? tracks.filter(t => trackMatchesQuery(t, searchQuery)) : tracks),
+    [tracks, searching, searchQuery]
+  );
+
   // Per-open sort (resets whenever the detail item changes) + selection.
-  const sortApi = useTrackSort(tracks, { resetKey: `${item.type}:${item.key}` });
+  const sortApi = useTrackSort(listTracks, { resetKey: `${item.type}:${item.key}` });
   const selection = useTrackSelection(sortApi.sorted);
 
   // Register as the active list for Cmd+A (App-menu IPC routes through this).
@@ -333,7 +349,7 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
   // with mask-composite: 'intersect' (the same technique the reverted
   // vignette used, here for a genuine functional reason rather than
   // decoration): the existing right-edge fade, unchanged, plus a
-  // HERO_TEXT_FADE_WIDE (240px) fade from the bottom — sized as a fixed
+  // HERO_TEXT_FADE_WIDE (300px) fade from the bottom — sized as a fixed
   // pixel depth, not a percentage of the hero's own height (which the
   // narrow version uses), since full-width's hero can be much taller than
   // narrow's and a percentage-based fade would end up covering far more
@@ -394,7 +410,14 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
       </button>
       <div style={{
         position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 2,
-        padding: isNarrowLayout ? '0 24px 20px' : '0 28px 32px',
+        // Full-width: the text block's bottom padding is the same clearance the
+        // tracklist reserves for the floating pill (bottomClearance, 89px), not
+        // a fixed 32. The pill is centered and at ~1000px wide it reaches left
+        // under this 35%-wide column, covering the Play button by ~42px; this
+        // puts Play's bottom edge 14px above the pill's top at every width, so
+        // its position never jumps as the window is resized. Narrow's hero sits
+        // at the top of the page, nowhere near its pill, so it keeps 20.
+        padding: isNarrowLayout ? '0 24px 20px' : `0 28px ${Math.max(32, bottomClearance)}px`,
         display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
       }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--chrome-text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, textShadow: heroTextShadow }}>
@@ -510,6 +533,11 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
           extraColumns={visibleExtraColumns}
           initialOffset={savedScrollTop}
           bottomPadding={bottomClearance}
+          emptyState={searching ? (
+            <div style={{ color: 'var(--text-secondary)', textAlign: 'center', marginTop: 60 }}>
+              <p style={{ fontSize: 15 }}>No tracks match "{searchQuery.trim()}".</p>
+            </div>
+          ) : undefined}
         />
       </div>
     </>
@@ -528,7 +556,13 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
               toward the bottom (heroMask), so the band has no hard bottom
               edge — it dissolves into the same glass surface the tracklist
               sits on. */}
-          <div style={{ position: 'relative', height: 'clamp(280px, 45vh, 460px)', flexShrink: 0 }}>
+          {/* The 280px floor only holds down to the window's old 600px minimum
+              height; below that (reachable now that the mini player lets the
+              window get short) it eases down to 230px, just enough for the
+              back button plus a two-line title block, so the track list keeps
+              some room instead of being squeezed out entirely. At 600px and
+              above the clamp resolves exactly as before. */}
+          <div style={{ position: 'relative', height: 'clamp(max(230px, min(280px, calc(100vh - 320px))), 45vh, 460px)', flexShrink: 0 }}>
             <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', WebkitMaskImage: heroMask, maskImage: heroMask }}>
               {heroBackgroundEl}
             </div>

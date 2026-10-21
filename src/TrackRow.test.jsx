@@ -91,17 +91,55 @@ describe('TrackRow', () => {
     expect(row).toHaveClass('selected');
   });
 
-  it('shows EQ bars while the current track plays (not hovered)', () => {
+  it('marks the playing row with bars in the leading column instead of its number', () => {
     const { container } = renderRow({ isCurrent: true, isPlaying: true });
-    expect(container.querySelectorAll('.eq-bar').length).toBe(3);
+    expect(container.querySelectorAll('.row-eq i')).toHaveLength(3);
+    expect(container.querySelector('.row-eq')).not.toHaveClass('row-eq--paused');
+    expect(screen.queryByText('5')).not.toBeInTheDocument();
   });
 
-  it('artwork overlay click toggles play without selecting the row', () => {
+  it('the bars stand still while paused, and the artwork is no longer dimmed by old overlay bars', () => {
+    const { container } = renderRow({ isCurrent: true, isPlaying: false });
+    expect(container.querySelector('.row-eq')).toHaveClass('row-eq--paused');
+    expect(container.querySelectorAll('.eq-bar')).toHaveLength(0);
+  });
+
+  it('a row that is not playing shows its number and no bars', () => {
+    const { container } = renderRow();
+    expect(container.querySelector('.row-eq')).toBeNull();
+    expect(screen.getByText('5')).toBeInTheDocument();
+  });
+
+  it('the artwork overlay (play/pause) shows only while hovered, and clicking it toggles play without selecting the row', () => {
     const { container, props } = renderRow({ isCurrent: true, isPlaying: true });
-    const overlay = container.querySelectorAll('.eq-bar')[0].parentElement;
-    fireEvent.click(overlay);
+    const row = container.querySelector('.track-row');
+    expect(container.querySelector('svg.lucide-pause')).toBeNull();
+    fireEvent.mouseEnter(row);
+    const pause = container.querySelector('svg.lucide-pause');
+    expect(pause).toBeInTheDocument();
+    fireEvent.click(pause.parentElement);
     expect(props.onPlayToggle).toHaveBeenCalledWith(track, 4);
     expect(props.onRowClick).not.toHaveBeenCalled();
+  });
+
+  it('manual order: the drag handle is always mounted but only visible while hovered or dragging', () => {
+    const handleProps = { 'data-handle': 'yes' };
+    const { container, rerender, props } = renderRow({ leading: 'handle', sortable: { setNodeRef: () => {}, style: {}, handleProps, isDragging: false } });
+    const handle = () => container.querySelector('.track-row-handle');
+    expect(handle()).toBeInTheDocument();
+    expect(handle()).toHaveAttribute('data-handle', 'yes');
+    expect(handle()).toHaveStyle({ opacity: 0 });
+    fireEvent.mouseEnter(container.querySelector('.track-row'));
+    expect(handle()).toHaveStyle({ opacity: 1 });
+    fireEvent.mouseLeave(container.querySelector('.track-row'));
+    expect(handle()).toHaveStyle({ opacity: 0 });
+    rerender(<TrackRow {...props} leading="handle" sortable={{ setNodeRef: () => {}, style: {}, handleProps, isDragging: true }} />);
+    expect(handle()).toHaveStyle({ opacity: 1 });
+  });
+
+  it('manual order still shows the position number at rest', () => {
+    renderRow({ leading: 'handle', sortable: { setNodeRef: () => {}, style: {}, handleProps: {}, isDragging: false } });
+    expect(screen.getByText('5')).toBeInTheDocument();
   });
 
   it('keeps the time cell width stable between rest and hover (no layout jump)', () => {

@@ -10,6 +10,11 @@ import usePillPhase from './usePillPhase';
 // pill's scale.
 const PILL_HEIGHT = 56;
 const ARTWORK_SIZE = 44;
+// Same concentric-corner system as PlayerPill.jsx: a soft rounded rectangle,
+// with the artwork inset equally from the top, bottom and left edges so its
+// radius is the pill's minus that inset.
+const PILL_RADIUS = 18;
+const ARTWORK_RADIUS = PILL_RADIUS - 1 - (PILL_HEIGHT - ARTWORK_SIZE) / 2; // - 1: the pill's border
 const PLAY_PAUSE_SIZE = 44;
 const PLAY_PAUSE_ICON_SIZE = 20;
 const NEXT_ICON_SIZE = 20;
@@ -90,7 +95,7 @@ export default function PlayerPillNarrow({
           position: 'relative', zIndex: 1,
           width: 'calc(100vw - 24px)',
           height: PILL_HEIGHT,
-          borderRadius: 9999,
+          borderRadius: PILL_RADIUS,
           overflow: 'hidden',
           cursor: 'default',
           pointerEvents: phase === 'exiting' ? 'none' : 'auto',
@@ -109,7 +114,7 @@ export default function PlayerPillNarrow({
         <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px 0 6px' }}>
           <div
             className="player-artwork"
-            style={{ width: ARTWORK_SIZE, height: ARTWORK_SIZE, borderRadius: 9, background: 'rgba(0,0,0,0.06)', overflow: 'hidden', flexShrink: 0 }}
+            style={{ width: ARTWORK_SIZE, height: ARTWORK_SIZE, borderRadius: ARTWORK_RADIUS, background: 'rgba(0,0,0,0.06)', overflow: 'hidden', flexShrink: 0 }}
           >
             {track?.thumb ? <img src={track.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={18} style={{ margin: 13 }} color="var(--text-secondary)" />}
           </div>

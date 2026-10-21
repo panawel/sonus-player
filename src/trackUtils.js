@@ -2,6 +2,17 @@
 // Single source of truth — replaces the formatTime copies that used to live in
 // SortableTrackRow.jsx / HomeDetailView.jsx / HomeView.jsx.
 
+// The one definition of "does this track match what the user typed" — Library
+// search, a Details page's search and Home's grouped Songs results all use it,
+// so the three can never disagree about what counts as a match. Same fields
+// the Tag Editor exposes: Title / Artist / Album / Year / Genre.
+export function trackMatchesQuery(track, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return [track.title, track.artist, track.album, track.year, track.genre]
+    .some(field => field && String(field).toLowerCase().includes(q));
+}
+
 // Row geometry per density — shared by TrackRow, TrackList, and the header.
 export const ROW_HEIGHTS = { compact: 44, comfortable: 56 };
 export const ART_SIZES = { compact: 30, comfortable: 40 };
@@ -112,6 +123,14 @@ export const LIBRARY_GENRE_COL_BREAKPOINT = 1000;
 // second hardcoded 560 that could silently drift from App.jsx's own.
 export const NARROW_LAYOUT_BREAKPOINT = 560;
 
+// Window height at or below which the whole shell is replaced by the mini
+// player (MiniPlayer.jsx). The window's minHeight used to be 600, so no
+// existing layout was ever designed for anything shorter than that; ~420 is
+// where the narrow/full-width UIs stop being usable and a single card reads
+// better. Shared (not hardcoded in App.jsx) for the same reason as the
+// width breakpoints above, and because main.js's minHeight is tuned against it.
+export const MINI_LAYOUT_HEIGHT_BREAKPOINT = 420;
+
 // 0..3 — how many of an ordered extra-columns list currently fit, given the
 // three width tiers above. Each wider threshold implies the narrower ones,
 // so this is a plain cascade rather than three independent checks.
@@ -197,4 +216,37 @@ export function compareBy(field, dir = 'asc') {
 export function sortTracks(tracks, field, dir) {
   if (!field || field === 'manual' || !sortFieldById(field)) return tracks;
   return [...tracks].sort(compareBy(field, dir));
+}
+
+// What the dialog is about: one song by name, or "N songs" led by the first.
+export function describeAddition(tracks) {
+  const n = tracks.length;
+  const first = tracks[0] || {};
+  const name = first.title || 'Untitled';
+  const art = first.thumb || null;
+  if (n === 1) {
+    return { heading: name, detail: [first.artist, '1 song'].filter(Boolean).join(' · '), art };
+  }
+  return { heading: `${n} songs`, detail: `${name} and ${n - 1} more`, art };
+}
+
+// "47 min", "1 hr 12 min", "132 hr": a list's total length, for the footer.
+// Under a minute still reads "1 min" (a "0 min" footer would look broken), and
+// past 100 hours the minutes are noise.
+export function formatTotalDuration(seconds) {
+  const mins = Math.max(1, Math.round((Number(seconds) || 0) / 60));
+  if (mins < 60) return `${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs >= 100) return `${hrs.toLocaleString('en-US')} hr`;
+  const rest = mins % 60;
+  return rest === 0 ? `${hrs} hr` : `${hrs} hr ${rest} min`;
+}
+
+// The footer under a track list: "1 song · 3 min", "20,000 songs · 1,204 hr".
+export function summarizeTracks(tracks) {
+  if (!tracks || tracks.length === 0) return '';
+  let total = 0;
+  for (const t of tracks) total += Number(t.duration) || 0;
+  const n = tracks.length;
+  return `${n.toLocaleString('en-US')} ${n === 1 ? 'song' : 'songs'} · ${formatTotalDuration(total)}`;
 }

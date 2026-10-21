@@ -3,7 +3,9 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { TrackRow, DraggableTrackRow } from './TrackRow.jsx';
-import { ROW_HEIGHTS } from './trackUtils.js';
+import { ROW_HEIGHTS, summarizeTracks } from './trackUtils.js';
+
+const FOOTER_HEIGHT = 40;
 
 // Left-button-only drag activation, so right-click stays free for the
 // context menu (moved here from App.jsx).
@@ -80,7 +82,10 @@ export default function TrackList({
     // padding to 900px produced a 0px change in scrollHeight. paddingEnd
     // bakes the extra space into the virtualizer's own getTotalSize()
     // instead, which is what actually determines scrollHeight here.
-    paddingEnd: bottomPadding,
+    // The summary line lives in the first FOOTER_HEIGHT px of this padding, so it
+    // sits right under the last row and the floating player's clearance stays
+    // below it, instead of the line landing behind the pill at the scroll end.
+    paddingEnd: bottomPadding + (tracks.length > 0 ? FOOTER_HEIGHT : 0),
   });
   if (virtualizerRef) virtualizerRef.current = rowVirtualizer;
 
@@ -180,6 +185,8 @@ export default function TrackList({
     // ArrowLeft/Right intentionally fall through to the global ±5s seek.
   };
 
+  const summary = useMemo(() => summarizeTracks(tracks), [tracks]);
+
   const leading = canDrag ? 'handle' : 'index';
 
   const renderRow = (virtualRow) => {
@@ -223,6 +230,12 @@ export default function TrackList({
       style={{ position: 'relative', height: rowVirtualizer.getTotalSize() }}
     >
       {rowVirtualizer.getVirtualItems().map(renderRow)}
+      <div
+        className="track-list-footer"
+        style={{ position: 'absolute', left: 0, right: 0, height: FOOTER_HEIGHT, top: rowVirtualizer.getTotalSize() - bottomPadding - FOOTER_HEIGHT }}
+      >
+        {summary}
+      </div>
     </div>
   );
 

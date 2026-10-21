@@ -11,6 +11,10 @@ import { createIndexStore, diffPaths } from './indexStore.mjs';
 import { sortByFileName } from './launchFiles.mjs';
 import { installFinderServices } from './finderServices.mjs';
 import { expandToFiles } from './folderScan.mjs';
+import { createPointerTracker } from './pointerTracker.mjs';
+import { createMotionTracker } from './pointerMotion.mjs';
+import { fileMenuTemplate, controlsMenuTemplate, applyMenuState } from './appMenu.mjs';
+import { modeBounds } from './windowModes.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +24,14 @@ const __dirname = path.dirname(__filename);
 // instead of the dev server.
 const SMOKE = process.argv.includes('--smoke');
 if (SMOKE) {
+  // A smoke window that is covered or the display idle gets throttled by
+  // Chromium/macOS (timers and requestAnimationFrame slow to a crawl), which
+  // looked like random failures and 10+ minute stalls on an idle Mac. The suite
+  // measures the app, not the OS's power management, so smoke windows opt out;
+  // normal runs are untouched.
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('disable-background-timer-throttling');
   app.setPath('userData', path.join(app.getPath('temp'), `sonus-smoke-${process.pid}`));
 }
 
@@ -268,12 +280,17 @@ function createWindow() {
     width: mainWindowState.width,
     height: mainWindowState.height,
     minWidth: 380,
-    minHeight: 600,
+    // 180 is the shortest the mini player (MiniPlayer.jsx, shown below
+    // MINI_LAYOUT_HEIGHT_BREAKPOINT in trackUtils.js) fits its content in.
+    // Everything between that and the old 600 floor is mini or a layout that
+    // used to be unreachable — see docs/ARCHITECTURE.md's "Mini player".
+    minHeight: 180,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: false // allow file:// access for audio tags
+      webSecurity: false, // allow file:// access for audio tags
+      backgroundThrottling: !SMOKE // see the SMOKE switches at the top
     },
     vibrancy: 'under-window',
     visualEffectState: 'active',
@@ -457,6 +474,48 @@ ipcMain.on('tag-editor:resize', (event, contentHeight) => {
   if (!tagEditorWindow.isVisible()) tagEditorWindow.show();
 });
 
+// File > Add Music / Controls items are messages to the renderer (preload's
+// onMenuCommand): the player's own handlers run them. They always address the
+// main window, even when the Tag Editor window is the one with focus.
+function sendMenuCommand(command) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('menu-command', command);
+}
+
+// File > Filled Screen / Narrow / Mini Mode: just a resize. The renderer
+// derives narrow and mini from the window's size (see windowModes.mjs), so
+// nothing else needs telling. Native full screen is left first; resizing
+// inside it does nothing.
+function applyWindowMode(mode) {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  const apply = () => {
+    if (win.isDestroyed()) return;
+    const cur = win.getBounds();
+    const workArea = screen.getDisplayMatching(cur).workArea;
+    win.setBounds(modeBounds(mode, cur, workArea, win.getMinimumSize()), true);
+  };
+  if (win.isFullScreen()) {
+    win.once('leave-full-screen', () => setTimeout(apply, 100));
+    win.setFullScreen(false);
+    return;
+  }
+  apply();
+}
+
+// File > Chill Mode: fill the screen, then ask the renderer to open Now Playing
+// in Chill mode. Already in native full screen (View > Enter Full Screen), the
+// window is left as it is rather than being pulled out of it. Leaving Chill
+// mode later does not undo the resize (by design: it stays full).
+function enterChillMode() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isFullScreen()) applyWindowMode('filled');
+  sendMenuCommand('enter-chill');
+}
+
 function buildAppMenu() {
   const template = [
     {
@@ -465,7 +524,7 @@ function buildAppMenu() {
     },
     {
       label: 'File',
-      role: 'fileMenu'
+      submenu: fileMenuTemplate({ send: sendMenuCommand, setWindowMode: applyWindowMode, enterChill: enterChillMode })
     },
     {
       label: 'Edit',
@@ -483,6 +542,17 @@ function buildAppMenu() {
           accelerator: 'CommandOrControl+A',
           click: (menuItem, window) => {
             window?.webContents.send('menu-select-all');
+          }
+        },
+        { type: 'separator' },
+        {
+          // Opens the search field for whichever page is showing (App.jsx).
+          // An IPC round-trip, like Select All, because a menu accelerator
+          // never reaches the page as a DOM keydown.
+          label: 'Find',
+          accelerator: 'CommandOrControl+F',
+          click: (menuItem, window) => {
+            window?.webContents.send('menu-find');
           }
         },
         { type: 'separator' },
@@ -508,6 +578,10 @@ function buildAppMenu() {
     {
       label: 'View',
       role: 'viewMenu'
+    },
+    {
+      label: 'Controls',
+      submenu: controlsMenuTemplate({ send: sendMenuCommand })
     },
     {
       label: 'Window',
@@ -934,6 +1008,146 @@ ipcMain.on('library:save', (event, state) => {
   });
 });
 
+
+// Mini player chrome (MiniPlayer.jsx). In mini mode the traffic lights are
+// hidden and the card's expand button is shown only while the pointer is over
+// the window — both driven by this one signal so they always appear and
+// disappear together. The pointer is tracked HERE, from the OS cursor position
+// (see pointerTracker.mjs), because the card is a window-drag area and the
+// page never receives mouse events over it. The renderer just says when mini
+// mode starts/stops and receives `window:pointer-inside`.
+//
+// The ONE place the traffic lights are shown or hidden, so the last requested
+// state is recorded on the window (`__sonusButtonsVisible`): macOS has no getter,
+// and the smoke suite needs to assert it.
+function setWindowButtons(win, visible) {
+  if (win.isDestroyed()) return;
+  win.__sonusButtonsVisible = visible;
+  win.setWindowButtonVisibility?.(visible);
+}
+const miniChromeTrackers = new Map();
+function stopMiniChromeTracking(win) {
+  const entry = miniChromeTrackers.get(win);
+  if (!entry) return;
+  entry.tracker.stop();
+  win.removeListener('closed', entry.onClosed);
+  miniChromeTrackers.delete(win);
+  setWindowButtons(win, true);
+}
+ipcMain.on('window:mini-chrome-tracking', (event, enabled) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  stopMiniChromeTracking(win);
+  if (!enabled) return;
+  const tracker = createPointerTracker({
+    getCursor: () => screen.getCursorScreenPoint(),
+    getBounds: () => win.getBounds(),
+    onChange: (inside) => {
+      if (win.isDestroyed()) return;
+      setWindowButtons(win, inside);
+      win.webContents.send('window:pointer-inside', inside);
+    },
+  });
+  const onClosed = () => { tracker.stop(); miniChromeTrackers.delete(win); };
+  miniChromeTrackers.set(win, { tracker, onClosed });
+  win.once('closed', onClosed);
+  tracker.start();
+});
+
+
+// Chill mode's chrome (ChillScene.jsx + the title bar in App.jsx) fades away
+// after a quiet spell and returns when the pointer moves. Two things only this
+// process can do: report cursor movement over the window's drag areas (the
+// title strip — see pointerMotion.mjs) and hide/show the traffic lights. The
+// renderer owns WHEN (its idle clock) and tells us through
+// `window:set-buttons-visible`. Whenever tracking stops — chill exits, leaves
+// Now Playing, goes narrow/mini, the window closes or the page reloads — the
+// lights are put back, so a window can never be left without them. (Unless the
+// mini player is tracking the same window: it owns the lights then.)
+const chillChromeTrackers = new Map();
+function stopChillChromeTracking(win) {
+  const entry = chillChromeTrackers.get(win);
+  if (!entry) return;
+  entry.tracker.stop();
+  win.removeListener('closed', entry.onGone);
+  if (!win.isDestroyed()) win.webContents.removeListener('did-start-loading', entry.onGone);
+  chillChromeTrackers.delete(win);
+  if (!miniChromeTrackers.has(win)) setWindowButtons(win, true);
+}
+ipcMain.on('window:chill-chrome-tracking', (event, enabled) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  stopChillChromeTracking(win);
+  if (!enabled) return;
+  const tracker = createMotionTracker({
+    getCursor: () => screen.getCursorScreenPoint(),
+    getBounds: () => win.getBounds(),
+    onMove: () => { if (!win.isDestroyed()) win.webContents.send('window:pointer-moved'); },
+  });
+  const onGone = () => stopChillChromeTracking(win);
+  chillChromeTrackers.set(win, { tracker, onGone });
+  win.once('closed', onGone);
+  win.webContents.once('did-start-loading', onGone);
+  tracker.start();
+});
+// Page-driven window drag, used where a `-webkit-app-region: drag` area can't
+// be had: the add-songs dialog (AddTracksDialog.jsx) sits over a window-wide
+// no-drag backdrop that must keep taking clicks. The renderer sends 'start' on
+// mouse-down, 'move' on every mouse-move while the button is held, 'end' on
+// release. The position comes from the OS cursor (not from the renderer's mouse
+// event coordinates): it is the same truth a native drag uses, it needs no
+// DIP/screen conversion, and synthetic input events carry no screen
+// coordinates, which would make the smoke suite unable to see the drag at all.
+// The smoke suite moves the real cursor to exercise it.
+const windowDrags = new Map();
+ipcMain.on('window:drag', (event, phase) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return;
+  if (phase === 'start') {
+    windowDrags.set(win.id, { origin: win.getPosition(), cursor: screen.getCursorScreenPoint() });
+  } else if (phase === 'move') {
+    const drag = windowDrags.get(win.id);
+    if (!drag) return;
+    const cursor = screen.getCursorScreenPoint();
+    win.setPosition(drag.origin[0] + cursor.x - drag.cursor.x, drag.origin[1] + cursor.y - drag.cursor.y, false);
+  } else {
+    windowDrags.delete(win.id);
+  }
+});
+
+ipcMain.on('window:set-buttons-visible', (event, visible) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || !chillChromeTrackers.has(win)) return; // only while chill tracking is on
+  setWindowButtons(win, !!visible);
+});
+
+// Mini player's expand button / Escape (MiniPlayer.jsx): grow the window back
+// to a normal size. The renderer owns the "last normal size" (it knows the
+// mini breakpoint; this process deliberately doesn't import renderer code),
+// so it sends it along; with none (the app launched already in mini mode)
+// this falls back to a 1000px-wide, MIN_RESTORED_HEIGHT-tall window. Position is
+// kept, only nudged as far as needed to keep the window on its own display.
+ipcMain.on('window:restore-from-mini', (event, size) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  const cur = win.getBounds();
+  const wa = screen.getDisplayMatching(cur).workArea;
+  const width = Math.min(wa.width, Math.max(win.getMinimumSize()[0], Math.round(size?.width) || 1000));
+  // Never shorter than MIN_RESTORED_HEIGHT, even if the remembered size was:
+  // windows between the mini breakpoint and the old 600px minimum are legal
+  // now, but cramped, and "expand" should land somewhere nothing is cut off.
+  const MIN_RESTORED_HEIGHT = 760;
+  const height = Math.min(wa.height, Math.max(MIN_RESTORED_HEIGHT, Math.round(size?.height) || 0));
+  const x = Math.min(Math.max(cur.x, wa.x), wa.x + wa.width - width);
+  const y = Math.min(Math.max(cur.y, wa.y), wa.y + wa.height - height);
+  win.setBounds({ x, y, width, height }, true);
+});
+
+// The renderer reports what the Controls menu needs to show (Play vs Pause,
+// shuffle tick, repeat mode, which items are usable); see applyMenuState.
+ipcMain.on('menu:set-state', (event, state) => {
+  if (state && typeof state === 'object') applyMenuState(Menu.getApplicationMenu(), state);
+});
 
 ipcMain.on('open-external-url', (event, url) => {
   if (typeof url !== 'string' || !url.startsWith('https://www.youtube.com/')) return;

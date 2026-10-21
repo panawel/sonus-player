@@ -28,8 +28,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onLibraryUpdated: (callback) => subscribe('library:updated', callback),
   onReindexProgress: (callback) => subscribe('reindex:progress', callback),
   onSelectAll: (callback) => subscribe('menu-select-all', callback),
+  onFind: (callback) => subscribe('menu-find', callback),
+  onMenuCommand: (callback) => subscribe('menu-command', callback),
+  setMenuState: (state) => ipcRenderer.send('menu:set-state', state),
   openTagEditor: (track) => ipcRenderer.invoke('open-tag-editor', track),
   onTagEditorLoad: (callback) => subscribe('tag-editor:load', callback),
   onTagSaved: (callback) => subscribe('tag-editor:saved', callback),
-  resizeTagEditor: (contentHeight) => ipcRenderer.send('tag-editor:resize', contentHeight)
+  resizeTagEditor: (contentHeight) => ipcRenderer.send('tag-editor:resize', contentHeight),
+  setMiniChromeTracking: (enabled) => ipcRenderer.send('window:mini-chrome-tracking', enabled),
+  onPointerInside: (callback) => subscribe('window:pointer-inside', callback),
+  restoreFromMini: (size) => ipcRenderer.send('window:restore-from-mini', size),
+  setChillChromeTracking: (enabled) => ipcRenderer.send('window:chill-chrome-tracking', enabled),
+  onPointerMoved: (callback) => subscribe('window:pointer-moved', callback),
+  setWindowButtonsVisible: (visible) => ipcRenderer.send('window:set-buttons-visible', visible),
+  dragWindow: (phase) => ipcRenderer.send('window:drag', phase)
 });

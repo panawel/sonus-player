@@ -1,5 +1,5 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, ChevronDown, MoreVertical, Plus, Search, X, Home, Mic2 } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, ChevronDown, MoreVertical, Plus, Search, Home, Mic2, Disc3, Minimize2, Images } from 'lucide-react';
 import { FastAverageColor } from 'fast-average-color';
 import { arrayMove } from '@dnd-kit/sortable';
 import TrackList from './TrackList.jsx';
@@ -7,15 +7,24 @@ import TrackListHeader from './TrackListHeader.jsx';
 import { useTrackSelection } from './useTrackSelection.js';
 import { useTrackSort } from './useTrackSort.js';
 import { useIsNarrow } from './useIsNarrow.js';
+import { useIsShort } from './useIsShort.js';
 import HomeView from './HomeView';
 import HomeDetailView from './HomeDetailView';
 import PlayerPill, { PLAYER_PILL_TOTAL_HEIGHT, PLAYER_PILL_BOTTOM_MARGIN } from './PlayerPill.jsx';
+import MiniPlayer from './MiniPlayer.jsx';
+import AddTracksDialog from './AddTracksDialog';
+import SearchPanel from './SearchPanel.jsx';
+import AmbientFlares from './AmbientFlares.jsx';
+import ChillScene from './ChillScene.jsx';
+import ChillScenePicker from './ChillScenePicker.jsx';
+import useChillChrome from './useChillChrome.js';
+import { CHILL_SCENES, getChillScene, loadChillSceneId, saveChillSceneId } from './chillScenes.js';
 import PlayerPillNarrow, { PLAYER_PILL_NARROW_TOTAL_HEIGHT, PLAYER_PILL_NARROW_BOTTOM_MARGIN } from './PlayerPillNarrow.jsx';
 import cx from 'classnames';
 import { splitArtists, isRTL } from './audioUtils.js';
 import { __setMixCacheForTest } from './useMix.js';
 import {
-  LIBRARY_EXTRA_COLUMNS, ULTRA_COMPACT_PANEL_BREAKPOINT, NARROW_LAYOUT_BREAKPOINT,
+  LIBRARY_EXTRA_COLUMNS, trackMatchesQuery, ULTRA_COMPACT_PANEL_BREAKPOINT, NARROW_LAYOUT_BREAKPOINT, MINI_LAYOUT_HEIGHT_BREAKPOINT,
   LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT, extraColumnFitCount,
 } from './trackUtils.js';
 import './index.css';
@@ -94,13 +103,10 @@ export default function App() {
   const [hoverTime, setHoverTime] = useState(null);
   const [pendingNewTracks, setPendingNewTracks] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  // Nav-pill search segment's open/closed state — see the auto-close effect
-  // near the pill's JSX for the full close-timing logic (hover + empty query,
-  // with a short grace period).
+  // Whether the floating search panel (SearchPanel.jsx) is open. Opened by the
+  // title bar's search button or ⌘F; see searchScope and the page-change
+  // effect further down for how it relates to the page underneath.
   const [searchOpen, setSearchOpen] = useState(false);
-  const searchInputRef = useRef(null);
-  const searchHoveredRef = useRef(false);
-  const searchCloseTimerRef = useRef(null);
   // Row density shared by every tracklist (persisted).
   const [density, setDensityState] = useState(() => {
     try { return localStorage.getItem('sonus.trackDensity') === 'comfortable' ? 'comfortable' : 'compact'; } catch { return 'compact'; }
@@ -115,13 +121,14 @@ export default function App() {
   const sortedLibrary = librarySortApi.sorted;
   // Filters against the same fields the Tag Editor exposes (Title/Artist/Album/Year/Genre).
   // Purely a display-time filter over the loaded library - never mutates `library` itself.
+  // Only while Library is the page on screen: the same query box also drives a
+  // Details page's own list and Home's grouped results, and none of those may
+  // silently filter the Library behind them (playback order walks this list).
+  const librarySearchQuery = view === 'library' ? searchQuery : '';
   const visibleTracks = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return sortedLibrary;
-    return sortedLibrary.filter(t =>
-      [t.title, t.artist, t.album, t.year, t.genre].some(field => field && String(field).toLowerCase().includes(q))
-    );
-  }, [sortedLibrary, searchQuery]);
+    if (!librarySearchQuery.trim()) return sortedLibrary;
+    return sortedLibrary.filter(t => trackMatchesQuery(t, librarySearchQuery));
+  }, [sortedLibrary, librarySearchQuery]);
   const librarySelection = useTrackSelection(visibleTracks);
   // Stable pieces of the selection API for use inside memoized callbacks.
   const { clear: clearLibrarySelection, prune: pruneLibrarySelection, selectedPathsRef: librarySelectedRef } = librarySelection;
@@ -169,6 +176,10 @@ export default function App() {
   const [playerSubtitleDuration, setPlayerSubtitleDuration] = useState('8s');
   const isUltraCompactPanel = useIsNarrow(ULTRA_COMPACT_PANEL_BREAKPOINT);
   const isNarrowLayout = useIsNarrow(NARROW_LAYOUT_BREAKPOINT);
+  // Window short enough that the mini player replaces the whole shell (see
+  // MiniPlayer.jsx). Independent of isNarrowLayout: a 420x300 window is both,
+  // and mini wins everywhere below.
+  const isMiniLayout = useIsShort(MINI_LAYOUT_HEIGHT_BREAKPOINT);
   // How many of LIBRARY_EXTRA_COLUMNS currently fit; the Album cutoff reuses
   // isUltraCompactPanel (see trackUtils.js for the cascade + why).
   const isLibraryYearColHidden = useIsNarrow(LIBRARY_YEAR_COL_BREAKPOINT);
@@ -357,7 +368,7 @@ export default function App() {
     playTrack(tracks[0], true);
   }, [playTrack, clearLibrarySelection]);
 
-  // Drag-and-drop and the sidebar's Add Files. Both deliberately keep the
+  // Drag-and-drop and the title bar's + (Add music). Both deliberately keep the
   // confirm modal; only the OS-driven open paths skip it.
   const handleNewTracks = React.useCallback((newTracks) => {
     if (library.length > 0) setPendingNewTracks(newTracks);
@@ -714,6 +725,21 @@ export default function App() {
     forcedNextQueueRef.current = [...tracksToQueue.map(t => t.filePath), ...forcedNextQueueRef.current];
   }, [library, currentTrack, playTrack]);
 
+  // Keep the menu inside the window whatever its size: it opens above or below its button, but in a very
+  // short window (the mini player can be 180px tall; the menu is ~130px) either side can clip, so after it
+  // is laid out it is nudged back inside a 6px margin.
+  const trackMenuRef = useRef(null);
+  React.useLayoutEffect(() => {
+    const el = trackMenuRef.current;
+    if (!el) return;
+    el.style.transform = '';
+    const r = el.getBoundingClientRect();
+    const m = 6;
+    const dy = r.top < m ? m - r.top : (r.bottom > window.innerHeight - m ? window.innerHeight - m - r.bottom : 0);
+    const dx = r.left < m ? m - r.left : (r.right > window.innerWidth - m ? window.innerWidth - m - r.right : 0);
+    if (dx || dy) el.style.transform = `translate(${dx}px, ${dy}px)`;
+  }, [trackMenu]);
+
   const openTrackMenu = React.useCallback((filePaths, anchorRect) => {
     setTrackMenu({ filePaths, anchorRect, context: 'tracklist' });
   }, []);
@@ -916,7 +942,8 @@ export default function App() {
   const QUICK_CLICK_MS = 250;
 
   const handlePlayPausePressStart = () => {
-    if (view !== 'library') return;
+    // Not in mini mode: the Library it would scroll to is hidden underneath.
+    if (view !== 'library' || isMiniLayout) return;
     longPressTriggeredRef.current = false;
     pressStartTimeRef.current = Date.now();
     // The ring only shows once a press has clearly left "quick click" territory - the
@@ -948,7 +975,7 @@ export default function App() {
   };
 
   const handlePlayPauseClick = () => {
-    if (view !== 'library') {
+    if (view !== 'library' || isMiniLayout) {
       togglePlay();
       return;
     }
@@ -982,7 +1009,7 @@ export default function App() {
     const ringCircumference = 2 * Math.PI * ringRadius;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <button className="player-control-button clickable" style={{ color: isShuffle ? 'var(--accent-color)' : 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
+        <button className={cx('player-control-button player-toggle clickable', { 'player-toggle--on': isShuffle })} aria-pressed={isShuffle} aria-label="Shuffle" style={{ color: isShuffle ? 'var(--chrome-text)' : 'var(--chrome-text-off)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
           <Shuffle size={secondarySize} />
         </button>
         <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
@@ -1022,7 +1049,7 @@ export default function App() {
         <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); playNext(false); }}>
           <SkipForward size={controlSize} fill="currentColor" />
         </button>
-        <button className="player-control-button clickable" style={{ color: repeatMode !== 'off' ? 'var(--accent-color)' : 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
+        <button className={cx('player-control-button player-toggle clickable', { 'player-toggle--on': repeatMode !== 'off' })} aria-pressed={repeatMode !== 'off'} aria-label={`Repeat: ${repeatMode}`} style={{ color: repeatMode !== 'off' ? 'var(--chrome-text)' : 'var(--chrome-text-off)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
           {repeatMode === 'one' ? <Repeat1 size={secondarySize} /> : <Repeat size={secondarySize} />}
         </button>
       </div>
@@ -1144,6 +1171,33 @@ export default function App() {
   }, []);
 
   const isNowPlayingOpen = view === 'now_playing';
+  // Chill mode: full-width Now Playing as a turntable (ChillScene.jsx). The
+  // preference outlives leaving Now Playing and a narrow/mini excursion, but it
+  // only takes effect where it can render: Now Playing, full width, a track.
+  const [isChillMode, setIsChillMode] = useState(false);
+  // Which Chill scene (turntable / hammock), remembered between launches, and the
+  // picker popup that changes it.
+  const [chillSceneId, setChillSceneId] = useState(loadChillSceneId);
+  const [chillPickerOpen, setChillPickerOpen] = useState(false);
+  const chooseChillScene = (id) => { setChillSceneId(id); saveChillSceneId(id); setChillPickerOpen(false); };
+  const chillSceneIdRef = useRef(chillSceneId);
+  chillSceneIdRef.current = chillSceneId;
+  const chillActive = isChillMode && isNowPlayingOpen && !isNarrowLayout && !isMiniLayout && !!currentTrack;
+  // One idle clock for all of Chill mode's chrome: the bar (ChillScene), the
+  // title strip's buttons below, and the traffic lights (via main). Held up
+  // while something is open over it.
+  const { visible: chillChromeVisible } = useChillChrome({
+    active: chillActive,
+    playing: isPlaying,
+    hold: searchOpen || !!trackMenu || !!pendingNewTracks || chillPickerOpen,
+  });
+  React.useEffect(() => { if (!chillActive) setChillPickerOpen(false); }, [chillActive]);
+  const chillChromeHidden = chillActive && !chillChromeVisible;
+  // Classes/attributes shared by the title strip's controls while Chill mode is on.
+  const chillChromeProps = chillActive
+    ? { 'data-chill-chrome': true, inert: isMiniLayout || chillChromeHidden || undefined }
+    : { inert: isMiniLayout };
+  const chillChromeClass = chillActive ? ` chill-chrome-fade${chillChromeHidden ? ' chill-chrome-hidden' : ''}` : '';
   const npBackLabel = (previousView === 'home' && homeDetailItem)
     ? detailItemLabel(homeDetailItem)
     : ({ library: 'Library', home: 'Home' }[previousView] ?? 'Back');
@@ -1228,47 +1282,164 @@ export default function App() {
     playRecordedRef.current = false;
   }, [currentTrack?.filePath]);
 
-  // Nav-pill search segment — auto-focus the instant it opens.
+  // ── Search (SearchPanel.jsx) ───────────────────────────────────────────────
+  // A floating panel over whatever page you're on, opened from the title bar's
+  // search button or ⌘F. The text it holds also LIVE-FILTERS the page behind it
+  // where that page is a list:
+  //   Library          → the Library list (visibleTracks above)
+  //   a Details page   → that page's own tracks (HomeDetailView)
+  //   Home / Now Playing → nothing to filter; the panel's results are the thing
+  // The panel itself searches the whole library (grouped Artists / Albums /
+  // Songs), except on a Details page where it starts scoped to that page.
+  const searchScope = view === 'library' ? 'library'
+    : view === 'home' ? (homeDetailItem ? 'details' : 'home')
+    : null;
+  // The page's identity for search purposes. Search and its text never survive
+  // a change of page: a filter must not linger somewhere its panel isn't — and
+  // choosing an artist/album result navigates, which closes the panel for free.
+  const searchPageKey = view === 'now_playing'
+    ? 'now_playing'
+    : `${view}|${homeDetailItem ? `${homeDetailItem.type}:${homeDetailItem.key}` : ''}`;
   React.useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, [searchPageKey]);
 
-  // Force-close (no animation needed) whenever Library stops being the
-  // active view via some *other* route than the search button's own click
-  // handler (that one sets view and opens search together, in the same
-  // batch, so this sees them land in sync and leaves it alone) — e.g.
-  // clicking Home/Library while search happens to be open. The segment
-  // itself stays mounted (it's always visible now, not Library-only); this
-  // just keeps its open/closed state honest rather than silently reopening
-  // pre-expanded next time Library shows.
+  // The current Details page's (unfiltered) tracks, reported by HomeDetailView
+  // so the panel can scope to them.
+  const [detailPageTracks, setDetailPageTracks] = useState(null);
+
+  const openSearch = React.useCallback(() => {
+    if (isMiniLayout) return;
+    if (searchOpen) { document.querySelector('.search-panel-input')?.focus(); return; }
+    // The text is NOT cleared here: after an outside-click dismissal on
+    // Library/Details it is still filtering the list, and reopening shows it.
+    setSearchOpen(true);
+  }, [isMiniLayout, searchOpen]);
+  const closeSearch = React.useCallback(() => { setSearchOpen(false); setSearchQuery(''); }, []);
+  // A click outside the panel: close it, but on a page whose list the text is
+  // filtering (Library / Details) keep the filter until the page changes or
+  // the user clears it. Home and Now Playing have nothing filtered, so the
+  // text goes with the panel.
+  const dismissSearch = React.useCallback(() => {
+    setSearchOpen(false);
+    if (searchScope !== 'library' && searchScope !== 'details') setSearchQuery('');
+  }, [searchScope]);
+  const searchFilterActive = !searchOpen && searchQuery.trim() !== '' && (searchScope === 'library' || searchScope === 'details');
+
+  // Artist/album results (and anything else that opens a Details page from
+  // search): opens it, and sets the origin so its back button returns here —
+  // Library or Now Playing; from Home itself the plain Home back button does.
+  const openDetailFromSearch = React.useCallback((item) => {
+    setHomeDetailOrigin(view === 'home' ? null : view);
+    setView('home');
+    setHomeDetailItem(item);
+  }, [view]);
+
+  // ⌘F (Edit menu, electron/main.js) opens search.
+  const openSearchRef = useRef(openSearch);
+  openSearchRef.current = openSearch;
   React.useEffect(() => {
-    if (view !== 'library' && searchOpen) {
-      clearTimeout(searchCloseTimerRef.current);
-      setSearchOpen(false);
+    const unsub = window.electronAPI?.onFind?.(() => openSearchRef.current());
+    return unsub;
+  }, []);
+
+  // File > Add Music and the whole Controls menu (electron/appMenu.mjs). Each
+  // item arrives as one `menu-command` and runs the handler the on-screen
+  // control already uses, so queue/history/confirm-modal rules stay in one
+  // place. The handlers live in a ref refreshed every render: the subscription
+  // is made once and must never call a stale closure.
+  const goToCurrentSong = () => {
+    const ct = currentTrackRef.current;
+    if (!ct || isMiniLayout) return;
+    const reveal = () => {
+      const index = visibleTracks.findIndex(t => t.filePath === ct.filePath);
+      if (index !== -1) librarySelection.selectSingle(index);
+      scrollToTrack(ct.filePath, true);
+    };
+    if (view === 'library') {
+      reveal();
+    } else {
+      // Give the Library a moment to be on screen (and restore its own scroll)
+      // before jumping, or the restore wins.
+      setView('library');
+      setTimeout(reveal, 150);
     }
-  }, [view, searchOpen]);
-
-  // Auto-close once the query is empty AND the mouse isn't over the field —
-  // "over the field" is tracked via searchHoveredRef (set by the segment's
-  // own onMouseEnter/Leave below) rather than React state, so leaving doesn't
-  // wait on a render. Called both here (query just changed) and from
-  // onMouseLeave (hover just changed), since either can be the condition that
-  // flips last. The grace period absorbs a cursor that merely grazes the edge
-  // on its way past — re-entering hover, or typing again, cancels it via the
-  // clearTimeout at the top.
-  const SEARCH_AUTO_CLOSE_MS = 2000;
-  const scheduleSearchAutoClose = React.useCallback(() => {
-    clearTimeout(searchCloseTimerRef.current);
-    if (!searchOpen || searchHoveredRef.current || searchQuery !== '') return;
-    searchCloseTimerRef.current = setTimeout(() => setSearchOpen(false), SEARCH_AUTO_CLOSE_MS);
-  }, [searchOpen, searchQuery]);
-
+  };
+  const menuCommandsRef = useRef({});
+  menuCommandsRef.current = {
+    'add-music': handleAddFiles,
+    'play-pause': togglePlay,
+    'next': () => playNext(false),
+    'previous': playPrev,
+    'toggle-shuffle': () => setIsShuffle(s => !s),
+    'cycle-repeat': toggleRepeat,
+    'go-to-current': goToCurrentSong,
+    // File > Filled Screen / Narrow / Mini Mode end Chill (the exit button's effect).
+    'exit-chill': () => setIsChillMode(false),
+    // File > Chill Mode: the window is already being filled by main.js.
+    'enter-chill': () => {
+      if (!currentTrackRef.current) return;
+      expandNowPlaying();
+      setIsChillMode(true);
+    },
+  };
   React.useEffect(() => {
-    scheduleSearchAutoClose();
-    return () => clearTimeout(searchCloseTimerRef.current);
-  }, [searchQuery, scheduleSearchAutoClose]);
+    const unsub = window.electronAPI?.onMenuCommand?.((command) => menuCommandsRef.current[command]?.());
+    return unsub;
+  }, []);
+
+  // What the Controls menu shows: Play vs Pause, the shuffle tick, the repeat
+  // mode, and whether Next/Previous/Go to Current Song have a track to act on.
+  const hasCurrentTrack = !!currentTrack;
+  React.useEffect(() => {
+    window.electronAPI?.setMenuState?.({ hasTrack: hasCurrentTrack, isPlaying, isShuffle, repeatMode });
+  }, [hasCurrentTrack, isPlaying, isShuffle, repeatMode]);
 
   // Now Playing text and controls use fixed white/static colors — no artwork-color tinting.
+
+  // The window's last size while it was NOT mini — what the mini player's
+  // expand button restores. Tracked here (not in main.js) because this is
+  // where the mini breakpoint lives; every resize event is judged on its own
+  // size, so there's no window where a half-shrunk size gets recorded.
+  const normalWindowSizeRef = useRef(null);
+  React.useEffect(() => {
+    const record = () => {
+      if (window.innerHeight > MINI_LAYOUT_HEIGHT_BREAKPOINT) {
+        normalWindowSizeRef.current = { width: window.innerWidth, height: window.innerHeight };
+      }
+    };
+    record();
+    window.addEventListener('resize', record);
+    return () => window.removeEventListener('resize', record);
+  }, []);
+
+  // Mini mode's window chrome: the macOS traffic lights and the card's expand
+  // button are hidden until the pointer is over the window, and they appear
+  // and disappear together. The pointer is tracked by the MAIN process (the
+  // OS cursor against the window's bounds, electron/pointerTracker.mjs) and
+  // this just reports mini mode on/off and receives the verdict — the card is
+  // a window-drag area, so the page itself never sees the pointer over it
+  // (an earlier version listened for mouse events here and only worked over
+  // the no-drag controls). Main restores the traffic lights when tracking
+  // stops, so leaving mini mode always brings them back. Anything that would
+  // otherwise be left floating over the hidden app is closed on entry. Escape
+  // and the window edges remain ways out while the chrome is hidden.
+  const [miniChromeVisible, setMiniChromeVisible] = useState(false);
+  React.useEffect(() => {
+    if (!isMiniLayout) return;
+    setTrackMenu(null);
+    const api = window.electronAPI;
+    // Subscribe before enabling, so main's immediate first report isn't missed.
+    const unsubscribe = api?.onPointerInside?.(setMiniChromeVisible);
+    api?.setMiniChromeTracking?.(true);
+    return () => {
+      unsubscribe?.();
+      api?.setMiniChromeTracking?.(false);
+      setMiniChromeVisible(false);
+      setTrackMenu(null);   // a menu opened in mini mode must not follow the window out of it
+    };
+  }, [isMiniLayout]);
 
   // Automated-test hook — only exists when the page is loaded with ?test=1
   // (electron --smoke does this; the normal app never passes the query).
@@ -1281,6 +1452,13 @@ export default function App() {
       getView: () => viewRef.current,
       openDetail: (item) => { setHomeDetailOrigin(null); setView('home'); setHomeDetailItem(item); },
       closeDetail: () => setHomeDetailItem(null),
+      setChillMode: setIsChillMode,
+      // test hook: open the add-songs dialog without a native file dialog or a drag
+      openAddDialog: (tracks) => setPendingNewTracks(tracks),
+      setChillScene: chooseChillScene,
+      // test hook: give the playing track lyrics (or take them away) without changing track
+      setCurrentLyrics: (lyrics) => setCurrentTrack(t => (t ? { ...t, lyrics } : t)),
+      getChillScene: () => chillSceneIdRef.current,
       // Seeds useMix's in-memory cache directly, mirroring
       // __sonusTagEditorTest.openSearchResults — lets the suite drive every
       // Mix UI state (loading briefly, then ready/empty) without a real
@@ -1298,110 +1476,126 @@ export default function App() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* Primary navigation — Search / Add Music / Library / Home, grouped
-          into one glass pill in the draggable title-bar strip, the same spot
-          the old sidebar's hamburger used to occupy, at every window width
-          and every view (including narrow Now Playing's full-screen
-          takeover — these are direct destination buttons with no open/closed
-          state, so there's never a reason to hide them). Right-aligned since
-          the traffic lights always occupy the left edge. Order (right to
-          left, i.e. DOM left to right): Search, Add, Library, Home — Home
-          lands in the same rightmost spot the old hamburger used to. */}
-      <div className="nav-pill" style={{ position: 'fixed', top: 5, right: 16, zIndex: 51, WebkitAppRegion: 'no-drag' }}>
-        {/* Search — always visible, like the other three, but only ever
-            *expands* while Library is the active view (the input itself is
-            conceptually part of Library's UI). Clicking it from anywhere
-            else navigates to Library and opens it in the same motion — see
-            the onClick below. Collapsed to a plain icon button by default;
-            expands in place into a text input on click rather than
-            appearing elsewhere, so the pointer is already resting on it the
-            instant it opens (see the auto-close effects above: hovering it
-            is exactly what keeps it open). The pill's own
-            `position: fixed; right: 16` means growing this segment's width
-            just pushes the pill's left edge further left — no re-centering
-            math needed anywhere else. */}
-        <div
-          className={cx('nav-pill-search', { open: searchOpen })}
-          style={{ width: searchOpen ? (isNarrowLayout ? 150 : 210) : 28 }}
-          onMouseEnter={() => { searchHoveredRef.current = true; clearTimeout(searchCloseTimerRef.current); }}
-          onMouseLeave={() => { searchHoveredRef.current = false; scheduleSearchAutoClose(); }}
-        >
-          {searchOpen ? (
-            <>
-              <Search size={13} className="nav-pill-search-icon" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                className="nav-pill-search-input"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{ padding: searchQuery ? '0 24px 0 24px' : '0 8px 0 24px' }}
-                onKeyDown={e => {
-                  if (e.key !== 'Escape') return;
-                  if (searchQuery) setSearchQuery('');
-                  else { clearTimeout(searchCloseTimerRef.current); setSearchOpen(false); }
-                }}
-              />
-              {searchQuery && (
-                <button className="clickable nav-pill-search-clear" title="Clear search" onClick={() => setSearchQuery('')}>
-                  <X size={12} />
-                </button>
-              )}
-            </>
-          ) : (
-            <button
-              className="clickable nav-pill-btn nav-pill-search-toggle"
-              title="Search"
-              onClick={() => {
-                // A real mouse click always has a mouseenter just before it,
-                // but a keyboard/accessibility activation doesn't — without
-                // this, the auto-close effect would see searchHoveredRef
-                // still false the instant searchOpen flips true and
-                // immediately schedule a close, undoing the click that just
-                // opened it.
-                searchHoveredRef.current = true;
-                // Clicking from anywhere but Library jumps there first, in
-                // the same motion — the field is conceptually part of
-                // Library's UI, so "open search" and "show Library" are one
-                // action from every other screen (Home, a Home detail page,
-                // Now Playing at either width).
-                if (view !== 'library') setView('library');
-                setSearchOpen(true);
-              }}
-            >
-              <Search size={14} />
-            </button>
-          )}
-        </div>
+      {/* Chill mode: a fixed full-window layer (like the mini player), so the
+          photo fills the whole app, title strip included.
+          ITS POSITION IN THE DOCUMENT MATTERS. Electron builds the window's
+          draggable area by walking the page in document order: a later
+          `drag` region is UNIONED over earlier ones and a later `no-drag`
+          region is SUBTRACTED from them — z-index plays no part. The scene's
+          `.chill-drag-strip` is a drag band across the top, so it must come
+          BEFORE the title-bar buttons below (which are no-drag and carve
+          themselves back out of it). Rendered after them it re-claimed their
+          whole area as draggable and none of them could be clicked. */}
+      {chillActive && (
+        <ChillScene
+          key={chillSceneId}
+          scene={getChillScene(chillSceneId)}
+          currentTrack={currentTrack}
+          artSrc={npArtwork || currentTrack.thumb || null}
+          isPlaying={isPlaying}
+          artworkRgb={artworkRgb}
+          currentTime={currentTime}
+          duration={duration}
+          isSeeking={isSeeking}
+          seekValue={seekValue}
+          onSeekChange={handleSeekChange}
+          onSeekMouseDown={handleSeekMouseDown}
+          onSeekMouseUp={handleSeekMouseUp}
+          formatTime={formatTime}
+          marqueeFadeMask={marqueeFadeMask}
+          renderTransport={() => renderTransportControls({ playSize: 40, playIconSize: 20, playMargin: 8, controlSize: 22, secondarySize: 18 })}
+          onTogglePlay={togglePlay}
+          onExit={() => setIsChillMode(false)}
+          chromeVisible={chillChromeVisible}
+          onOpenMenu={(e) => { if (trackMenu) { setTrackMenu(null); return; } setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' }); }}
+          // Escape belongs to whatever sits on top first: the search panel,
+          // the track menu, the drop-confirm modal.
+          exitOnEscape={!searchOpen && !trackMenu && !pendingNewTracks && !chillPickerOpen}
+        />
+      )}
+
+      {/* Title-bar navigation: a centered Home | Library tab switch, then round
+          Search and "+" (Add music) buttons at the right edge — the traffic
+          lights own the left. Search opens a floating panel (SearchPanel, also
+          ⌘F). At narrow widths the tabs are icon-only, except the active one,
+          which also shows its name so you always know where you are. All of it
+          stays visible on every page, including narrow Now Playing's
+          full-screen takeover. */}
+      <div className={`nav-pill${chillChromeClass}`} {...chillChromeProps} style={{ position: 'fixed', top: 5, left: '50%', transform: 'translateX(-50%)', zIndex: 51, WebkitAppRegion: 'no-drag', opacity: isMiniLayout ? 0 : undefined }}>
         <button
-          className="clickable nav-pill-btn"
-          title="Add Music"
-          onClick={handleAddFiles}
-        >
-          <Plus size={14} />
-          {!isNarrowLayout && <span>Add</span>}
-        </button>
-        <button
-          className={cx('clickable nav-pill-btn', { active: view === 'library' })}
-          title="Library"
-          onClick={() => setView('library')}
-        >
-          <ListMusic size={14} />
-          {!isNarrowLayout && <span>Library</span>}
-        </button>
-        <button
-          className={cx('clickable nav-pill-btn', { active: view === 'home' })}
+          className={cx('clickable nav-pill-btn', { active: view === 'home', 'icon-only': isNarrowLayout && view !== 'home' })}
           title="Home"
           onClick={() => setView('home')}
         >
-          <Home size={14} />
-          {!isNarrowLayout && <span>Home</span>}
+          <Home size={15} />
+          {(!isNarrowLayout || view === 'home') && <span>Home</span>}
+        </button>
+        <button
+          className={cx('clickable nav-pill-btn', { active: view === 'library', 'icon-only': isNarrowLayout && view !== 'library' })}
+          title="Library"
+          onClick={() => setView('library')}
+        >
+          <ListMusic size={15} />
+          {(!isNarrowLayout || view === 'library') && <span>Library</span>}
         </button>
       </div>
+      <button
+        className={`clickable nav-search-btn${searchFilterActive ? ' active' : ''}${chillChromeClass}`}
+        title={searchFilterActive ? 'This list is filtered. Click to change or clear the search (⌘F)' : 'Search (⌘F)'}
+        aria-label="Search"
+        {...chillChromeProps}
+        onClick={openSearch}
+        style={{ position: 'fixed', top: 5, right: 56, zIndex: 51, WebkitAppRegion: 'no-drag', opacity: isMiniLayout ? 0 : undefined }}
+      >
+        <Search size={15} />
+      </button>
+      <button
+        className={`clickable nav-add-btn${chillChromeClass}`}
+        title="Add music"
+        aria-label="Add music"
+        {...chillChromeProps}
+        onClick={handleAddFiles}
+        style={{ position: 'fixed', top: 5, right: 16, zIndex: 51, WebkitAppRegion: 'no-drag', opacity: isMiniLayout ? 0 : undefined }}
+      >
+        <Plus size={16} />
+      </button>
+      {/* Chill mode only: leave it. Lives in the strip with the other round
+          buttons so it fades and returns with them (Escape works too). */}
+      {chillActive && (
+        <button
+          className={`clickable nav-add-btn chill-scene-btn${chillChromeClass}`}
+          title="Change scene"
+          aria-label="Change scene"
+          {...chillChromeProps}
+          onClick={() => setChillPickerOpen(v => !v)}
+          style={{ position: 'fixed', top: 5, right: 136, zIndex: 51, WebkitAppRegion: 'no-drag' }}
+        >
+          <Images size={15} />
+        </button>
+      )}
+      {chillActive && chillPickerOpen && (
+        <ChillScenePicker scenes={CHILL_SCENES} activeId={chillSceneId} onSelect={chooseChillScene} onClose={() => setChillPickerOpen(false)} />
+      )}
+      {chillActive && (
+        <button
+          className={`clickable nav-add-btn chill-exit-btn${chillChromeClass}`}
+          title="Exit chill mode (Esc)"
+          aria-label="Exit chill mode"
+          {...chillChromeProps}
+          onClick={() => setIsChillMode(false)}
+          style={{ position: 'fixed', top: 5, right: 96, zIndex: 51, WebkitAppRegion: 'no-drag' }}
+        >
+          <Minimize2 size={15} />
+        </button>
+      )}
 
       {/* Main Content Area */}
-      <div className="glass-panel" style={{ flex: 1, borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      {/* Hidden + inert (not unmounted) while the mini player shows: opacity
+          rather than visibility, because descendants such as .scrollable set
+          their own explicit visibility and would punch through a hidden
+          ancestor; and not display:none, which would collapse the scroll
+          containers and lose Library/detail scroll positions. */}
+      <div className="glass-panel" inert={isMiniLayout} style={{ flex: 1, borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', opacity: isMiniLayout ? 0 : undefined }}>
 
         {/* Column header, deliberately a SIBLING above .scrollable rather than
             sticky inside it — rows then physically cannot pass behind the
@@ -1526,9 +1720,12 @@ export default function App() {
               {library.length === 0 ? (
                 // Truly empty library: no bar at all. There's nothing to count
                 // or sort, so a full-bleed empty state reads as deliberate.
-                <div style={{ color: 'var(--text-secondary)', textAlign: 'center', marginTop: 100 }}>
+                // paddingTop, not marginTop: a margin here collapses through
+                // this height:100% parent and pushes it 100px down, which made
+                // the empty Library scroll by exactly that much.
+                <div style={{ color: 'var(--text-secondary)', textAlign: 'center', paddingTop: 100 }}>
                   <FolderOpen size={48} style={{ opacity: 0.5, marginBottom: 16, margin: '0 auto' }} />
-                  <p style={{ marginBottom: 16, fontSize: 16 }}>Drag and drop files here, or click <b>Add Files</b> in the sidebar to start listening.</p>
+                  <p style={{ marginBottom: 16, fontSize: 16 }}>Drag and drop files here, or click <b>+</b> at the top right to start listening.</p>
                 </div>
               ) : (
                 // A search that matches nothing keeps the bar (and so the count
@@ -1602,12 +1799,15 @@ export default function App() {
               savedScrollTop={homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] ?? 0}
               onScrollChange={(pos) => { homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] = pos; }}
               bottomClearance={isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE}
+              searchQuery={searchScope === 'details' ? searchQuery : ''}
+              onTracksChange={setDetailPageTracks}
             />
           )}
 
         </div>
 
-        {/* Now Playing: always mounted, fades + scales in over the current page / back out.
+
+      {/* Now Playing: always mounted, fades + scales in over the current page / back out.
             The outer wrapper owns position/pointer-events/no-drag and never itself carries
             a `transform` - Electron's native -webkit-app-region drag-region mask doesn't
             track a no-drag carve-out correctly when it's declared on the same element that
@@ -1652,44 +1852,14 @@ export default function App() {
               willChange: 'opacity, transform',
             }}
           >
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)' }} />
-            {/* Ambient color wash — solid circles inside a heavy blur furnace */}
-            {artworkRgb && (
-              <div style={{
-                position: 'absolute', inset: 0, overflow: 'hidden',
-                pointerEvents: 'none',
-                opacity: isPlaying ? 1 : 0,
-                transition: 'opacity 1.5s ease',
-              }}>
-                {/* Blur furnace: extends 15% past panel edges so blur's own soft edge stays hidden */}
-                <div style={{
-                  position: 'absolute',
-                  top: '-15%', left: '-15%', right: '-15%', bottom: '-15%',
-                  filter: 'blur(100px)',
-                }}>
-                  <div style={{
-                    position: 'absolute', width: '60%', aspectRatio: '1/1',
-                    top: '5%', left: '5%', borderRadius: '50%',
-                    background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.9)`,
-                    animation: 'np-flare-1 8s ease-in-out infinite',
-                    animationPlayState: isPlaying ? 'running' : 'paused',
-                  }} />
-                  <div style={{
-                    position: 'absolute', width: '50%', aspectRatio: '1/1',
-                    bottom: '5%', right: '5%', borderRadius: '50%',
-                    background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.8)`,
-                    animation: 'np-flare-2 13s ease-in-out infinite',
-                    animationPlayState: isPlaying ? 'running' : 'paused',
-                  }} />
-                  <div style={{
-                    position: 'absolute', width: '40%', aspectRatio: '1/1',
-                    top: '25%', right: '10%', borderRadius: '50%',
-                    background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.7)`,
-                    animation: 'np-flare-3 18s ease-in-out infinite',
-                    animationPlayState: isPlaying ? 'running' : 'paused',
-                  }} />
-                </div>
-              </div>
+            {/* Chill mode's photo is opaque and brings its own light, so neither
+                the glass blur nor the moving lights are mounted under it. */}
+            {!chillActive && (
+              <>
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)' }} />
+                {/* Ambient color wash — shared with the mini player, see AmbientFlares.jsx */}
+                <AmbientFlares artworkRgb={artworkRgb} isPlaying={isPlaying} />
+              </>
             )}
             {isNarrowLayout ? (
               <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', padding: '16px 20px 24px', boxSizing: 'border-box' }}>
@@ -1840,7 +2010,7 @@ export default function App() {
                   </div>
                 )}
               </div>
-            ) : (
+            ) : chillActive ? null : (
             <>
             {/* Glass-pill back button — same chip language as .glass-button /
                 the genre filter chips, rather than bare text+icon floating
@@ -1878,6 +2048,17 @@ export default function App() {
                 pill's job before the pill started hiding while Now Playing is
                 open; full-width NP needs its own now that it's self-contained
                 (see "Player pill" in docs/ARCHITECTURE.md). */}
+            {currentTrack && (
+              <button
+                className="player-control-button chill-enter-btn clickable"
+                title="Chill mode"
+                aria-label="Chill mode"
+                style={{ position: 'absolute', top: 10, right: 52, zIndex: 2, color: 'var(--chrome-text)' }}
+                onClick={(e) => { e.stopPropagation(); setIsChillMode(true); }}
+              >
+                <Disc3 size={20} />
+              </button>
+            )}
             {currentTrack && (
               <button
                 className="player-control-button clickable"
@@ -2126,7 +2307,7 @@ export default function App() {
           sibling below) so it can float above Library/Home/HomeDetailView's
           scrolled content and above Now Playing itself. See
           docs/ARCHITECTURE.md's "Player pill" section. */}
-      {!isNarrowLayout && (
+      {!isNarrowLayout && !isMiniLayout && (
         <PlayerPill
           currentTrack={currentTrack}
           isNowPlayingOpen={isNowPlayingOpen}
@@ -2185,7 +2366,7 @@ export default function App() {
           docked bar did in each of its two spots, now expressed as one
           branch instead of two separate onBarClick callbacks at two call
           sites. See docs/ARCHITECTURE.md's "Player pill" section. */}
-      {isNarrowLayout && (
+      {isNarrowLayout && !isMiniLayout && (
         <PlayerPillNarrow
           currentTrack={currentTrack}
           isNowPlayingOpen={isNowPlayingOpen}
@@ -2198,6 +2379,31 @@ export default function App() {
           onPlayPausePressEnd={handlePlayPausePressEnd}
           onTap={() => { if (isNowPlayingOpen) setIsLyricsOpen(false); else expandNowPlaying(); }}
           artworkRgb={artworkRgb}
+        />
+      )}
+
+      {isMiniLayout && (
+        <MiniPlayer
+          currentTrack={currentTrack}
+          isPlaying={isPlaying}
+          artworkRgb={artworkRgb}
+          chromeVisible={miniChromeVisible}
+          currentTime={currentTime}
+          duration={duration}
+          isSeeking={isSeeking}
+          seekValue={seekValue}
+          onSeekChange={handleSeekChange}
+          onSeekMouseDown={handleSeekMouseDown}
+          onSeekMouseUp={handleSeekMouseUp}
+          formatTime={formatTime}
+          marqueeFadeMask={marqueeFadeMask}
+          onRestore={() => window.electronAPI?.restoreFromMini?.(normalWindowSizeRef.current)}
+          // The drop-confirm modal can be open over the mini player; Escape
+          // should dismiss that first, not also resize the window.
+          // (and the track menu: Escape closes it first)
+          restoreOnEscape={!pendingNewTracks && !trackMenu}
+          onOpenMenu={(e) => { if (trackMenu) { setTrackMenu(null); return; } setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' }); }}
+          renderTransport={() => renderTransportControls({ playSize: 40, playIconSize: 20, playMargin: 8, controlSize: 22, secondarySize: 18 })}
         />
       )}
 
@@ -2233,41 +2439,42 @@ export default function App() {
       )}
 
       {pendingNewTracks && (
-        <div
-          className="confirm-modal-backdrop"
-          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', WebkitAppRegion: 'no-drag' }}
-          onClick={() => resolvePendingTracks('cancel')}
-        >
-          <div
-            className="confirm-modal-panel"
-            style={{ borderRadius: 16, padding: 24, width: 340, display: 'flex', flexDirection: 'column', gap: 16 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontSize: 15, color: 'var(--text-primary)' }}>
-              Add {pendingNewTracks.length} track{pendingNewTracks.length > 1 ? 's' : ''} to your library?
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button className="glass-button clickable" style={{ background: 'var(--accent-color)', color: '#fff', border: 'none', fontWeight: 600 }} onClick={() => resolvePendingTracks('play')}>
-                Play
-              </button>
-              <button className="glass-button confirm-modal-button clickable" onClick={() => resolvePendingTracks('play-next')}>
-                Play Next
-              </button>
-              <button className="glass-button confirm-modal-button clickable" onClick={() => resolvePendingTracks('add-to-queue')}>
-                Add to Queue
-              </button>
-              <button className="glass-button confirm-modal-button clickable" onClick={() => resolvePendingTracks('cancel')}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <AddTracksDialog
+          tracks={pendingNewTracks}
+          compact={isMiniLayout}
+          hasCurrentTrack={!!currentTrack}
+          onResolve={resolvePendingTracks}
+        />
+      )}
+
+      {/* The search panel lives at the ROOT, not inside .glass-panel: that card has
+          a backdrop-filter, which makes it its own stacking context (and the
+          containing block for fixed descendants), so nothing in it can out-rank a
+          sibling layer — Chill mode's full-window photo (z 30) covered the panel
+          completely while the button "did nothing". Its CSS `top` is 92px = the
+          42px title strip + the 50px it used to sit below the card's top. */}
+      {searchOpen && !isMiniLayout && (
+        <SearchPanel
+          query={searchQuery}
+          onQueryChange={setSearchQuery}
+          onClose={closeSearch}
+          onDismiss={dismissSearch}
+          library={library}
+          pageTracks={searchScope === 'details' ? detailPageTracks : null}
+          pageLabel={homeDetailItem ? detailItemLabel(homeDetailItem) : ''}
+          onOpenDetail={openDetailFromSearch}
+          playTrack={playTrackFresh}
+          currentTrack={currentTrack}
+          isNarrowLayout={isNarrowLayout}
+        />
       )}
 
       {/* Custom dropdown — track list 3-dots and Now Playing ⋮ */}
       {toast && (
         <div style={{
-          position: 'fixed', bottom: isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE, left: '50%', transform: 'translateX(-50%)',
+          // Mini mode has no pill to clear and its controls fill the bottom, so
+          // the toast drops to the top edge instead of covering them.
+          position: 'fixed', ...(isMiniLayout ? { top: 10 } : { bottom: isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE }), left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(24,24,28,0.95)', backdropFilter: 'blur(20px)',
           color: 'var(--text-primary)', padding: '10px 18px', borderRadius: 10,
           fontSize: 13, fontWeight: 500, zIndex: 2000,
@@ -2280,6 +2487,7 @@ export default function App() {
 
       {trackMenu && (
           <div
+            ref={trackMenuRef}
             className="track-dropdown"
             style={{
               position: 'fixed',
@@ -2317,6 +2525,9 @@ export default function App() {
                       setHomeDetailOrigin(view);
                       setView('home');
                       setHomeDetailItem({ type: 'mix', key: track.filePath, label: track.title || track.artist });
+                      // From the mini player the card covers everything: grow the window back first
+                      // (the expand button's own restore) so the mix page is actually seen.
+                      if (isMiniLayout) window.electronAPI?.restoreFromMini?.(normalWindowSizeRef.current);
                     }
                     setTrackMenu(null);
                   }}

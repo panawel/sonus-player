@@ -331,7 +331,6 @@ const QuickPickRow = memo(function QuickPickRow({ track, currentTrack, isPlaying
         background: isCurrent ? 'var(--glass-active)' : hovered ? 'var(--glass-highlight)' : 'var(--glass-bg)',
         transition: 'background 0.15s ease',
         cursor: 'pointer',
-        boxShadow: isCurrent ? 'inset 2px 0 0 var(--accent-color)' : 'none',
         border: '1px solid var(--glass-border)',
         minWidth: 0,
       }}
@@ -355,7 +354,7 @@ const QuickPickRow = memo(function QuickPickRow({ track, currentTrack, isPlaying
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
           fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          color: isCurrent ? 'var(--accent-color)' : 'var(--text-primary)',
+          color: 'var(--text-primary)',
         }}>
           {track.title}
         </div>

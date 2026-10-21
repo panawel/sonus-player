@@ -3,6 +3,7 @@ import {
   formatTime, compareBy, sortTracks, getSortValue, SORT_FIELDS, sortFieldById,
   COLUMN_CYCLES, nextInCycle, activeFieldForColumn, MANUAL_SORT,
   extraColumnFitCount, detailExtraColumns, LIBRARY_EXTRA_COLUMNS,
+  formatTotalDuration, summarizeTracks,
 } from './trackUtils.js';
 
 const t = (over = {}) => ({
@@ -198,5 +199,48 @@ describe('detailExtraColumns', () => {
     // Genre (last) must still be the first to go when the filtered list is sliced.
     const filtered = detailExtraColumns({ type: 'album', key: 'x' });
     expect(filtered.slice(0, 1).map(c => c.id)).toEqual(['year']);
+  });
+});
+
+describe('formatTotalDuration', () => {
+  it('minutes under an hour', () => {
+    expect(formatTotalDuration(47 * 60)).toBe('47 min');
+    expect(formatTotalDuration(59 * 60 + 29)).toBe('59 min');
+  });
+  it('never says 0 min', () => {
+    expect(formatTotalDuration(0)).toBe('1 min');
+    expect(formatTotalDuration(20)).toBe('1 min');
+    expect(formatTotalDuration(undefined)).toBe('1 min');
+  });
+  it('hours and minutes, dropping a zero minute part', () => {
+    expect(formatTotalDuration(72 * 60)).toBe('1 hr 12 min');
+    expect(formatTotalDuration(120 * 60)).toBe('2 hr');
+  });
+  it('rounds the minute up into the hour (59.5 min is 1 hr)', () => {
+    expect(formatTotalDuration(59 * 60 + 40)).toBe('1 hr');
+  });
+  it('past 100 hours the minutes go, and the number gets a separator', () => {
+    expect(formatTotalDuration((1204 * 60 + 17) * 60)).toBe('1,204 hr');
+    expect(formatTotalDuration(100 * 3600 + 1800)).toBe('100 hr');
+  });
+});
+
+describe('summarizeTracks', () => {
+  const song = (duration) => ({ duration });
+  it('is empty for no songs', () => {
+    expect(summarizeTracks([])).toBe('');
+    expect(summarizeTracks(null)).toBe('');
+  });
+  it('singular for one song', () => {
+    expect(summarizeTracks([song(180)])).toBe('1 song · 3 min');
+  });
+  it('plural with the total length', () => {
+    expect(summarizeTracks([song(171), song(173), song(192)])).toBe('3 songs · 9 min');
+  });
+  it('skips a missing duration instead of producing NaN', () => {
+    expect(summarizeTracks([song(120), {}, song(undefined)])).toBe('3 songs · 2 min');
+  });
+  it('formats a big library with separators', () => {
+    expect(summarizeTracks(Array.from({ length: 20000 }, () => song(200)))).toBe('20,000 songs · 1,111 hr');
   });
 });

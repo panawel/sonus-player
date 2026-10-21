@@ -47,6 +47,17 @@ function FlatCell({ value, flex, width, align, density, className, marginLeft })
   );
 }
 
+// The playing row's marker in the leading column: three white bars that dance
+// while the music plays and stand still while it is paused (replaces the track
+// number, and the bars that used to dim the artwork).
+function NowPlayingBars({ playing }) {
+  return (
+    <span className={cx('row-eq', { 'row-eq--paused': !playing })} aria-hidden="true">
+      <i /><i /><i />
+    </span>
+  );
+}
+
 function TrackRowImpl({
   track, index,
   isCurrent, isPlaying, isSelected,
@@ -65,8 +76,8 @@ function TrackRowImpl({
 }) {
   const [hovered, setHovered] = useState(false);
   const art = ART_SIZES[density];
-  const showOverlay = (isCurrent && isPlaying) || hovered;
   const extended = extraColumns !== null;
+  const handleShown = leading === 'handle' && (hovered || !!sortable?.isDragging);
 
   return (
     <div
@@ -76,7 +87,7 @@ function TrackRowImpl({
         display: 'flex', alignItems: 'center', gap: 12,
         height: ROW_HEIGHTS[density],
         padding: '0 12px',
-        borderRadius: 8,
+        borderRadius: 10,
         cursor: 'default',
         position: 'relative',
         ...(sortable?.style),
@@ -98,20 +109,35 @@ function TrackRowImpl({
         onRowContextMenu?.(track, index, { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY, width: 0, height: 0 });
       }}
     >
-      {/* Leading: drag handle (manual order) or position index */}
+      {/* Leading: the position number (or the now-playing bars). In manual order
+          the drag handle takes its place while the row is hovered or dragged:
+          always mounted (a handle that unmounted mid-drag would end the drag),
+          just invisible at rest. */}
       <div
-        {...(leading === 'handle' ? sortable?.handleProps : undefined)}
         style={{
-          width: 24, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: leading === 'handle' ? 'grab' : 'default',
+          width: 24, flexShrink: 0, alignSelf: 'stretch', position: 'relative',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           color: 'var(--text-secondary)',
         }}
-        onClick={leading === 'handle' ? (e) => e.stopPropagation() : undefined}
       >
-        {leading === 'handle'
-          ? <GripVertical size={15} />
-          : <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', opacity: hovered ? 0.9 : 0.55, color: isCurrent ? 'var(--accent-color)' : undefined }}>{index + 1}</span>
-        }
+        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: handleShown ? 0 : 1, transition: 'opacity 0.12s ease' }}>
+          {isCurrent
+            ? <NowPlayingBars playing={isPlaying} />
+            : <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', opacity: hovered ? 0.9 : 0.55 }}>{index + 1}</span>}
+        </span>
+        {leading === 'handle' && (
+          <div
+            {...sortable?.handleProps}
+            className="track-row-handle"
+            style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'grab', opacity: handleShown ? 1 : 0, transition: 'opacity 0.12s ease',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical size={15} />
+          </div>
+        )}
       </div>
 
       {/* Artwork + play/pause overlay + EQ bars while playing */}
@@ -120,18 +146,15 @@ function TrackRowImpl({
           ? <img src={track.thumb} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
           : <Music size={density === 'compact' ? 14 : 18} color="var(--text-secondary)" />
         }
-        {showOverlay && (
+        {hovered && (
           <div
-            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: hovered ? 'center' : 'flex-end', justifyContent: 'center', cursor: 'pointer', gap: 2, paddingBottom: hovered ? 0 : 6 }}
+            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
             onClick={(e) => { e.stopPropagation(); onPlayToggle?.(track, index); }}
             onDoubleClick={(e) => e.stopPropagation()}
           >
-            {hovered
-              ? (isCurrent && isPlaying
-                  ? <Pause size={density === 'compact' ? 15 : 18} fill="white" color="white" />
-                  : <Play size={density === 'compact' ? 14 : 17} fill="white" color="white" />)
-              : (<><div className="eq-bar" /><div className="eq-bar" /><div className="eq-bar" /></>)
-            }
+            {isCurrent && isPlaying
+              ? <Pause size={density === 'compact' ? 15 : 18} fill="white" color="white" />
+              : <Play size={density === 'compact' ? 14 : 17} fill="white" color="white" />}
           </div>
         )}
       </div>
@@ -233,6 +256,7 @@ export const DraggableTrackRow = memo(function DraggableTrackRow(props) {
       backdropFilter: isDragging ? 'blur(20px)' : undefined,
     },
     handleProps: { ...attributes, ...listeners },
+    isDragging,
   };
   return <TrackRowImpl {...props} sortable={sortable} />;
 });
