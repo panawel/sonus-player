@@ -705,7 +705,11 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         document.querySelector('.track-row').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
       })()
     `, true);
-    await waitFor(`(() => { const a = document.querySelector('audio'); return !!a && !a.paused; })()`, v => v === true);
+    // The fixture is only 20s long; everything from here to the Chill blocks
+    // runs longer than that under Rosetta (SLOW 2.5x), and an ended track left
+    // the Chill turntable block with paused audio - a cascade of unrelated
+    // failures that only showed on the Intel slice. Loop it from the start.
+    await waitFor(`(() => { const a = document.querySelector('audio'); if (a) a.loop = true; return !!a && !a.paused; })()`, v => v === true);
 
     const miniMeasure = `(() => {
       const mp = document.querySelector('.mini-player');
@@ -924,7 +928,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       await sleep(400);
       // The fixture is only 20s long and this block runs longer than that from
       // the moment playback started — loop it so it can't end underneath us.
-      await execC(`(() => { const a = document.querySelector('audio'); a.loop = true; })()`);
+      await execC(`(() => { const a = document.querySelector('audio'); a.loop = true; if (a.paused) a.play().catch(() => {}); })()`);
       await execC(`window.__sonusTest.setView('library')`);
       await execC(`document.querySelector('.player-pill').click()`);
       await waitFor(`window.__sonusTest.getView()`, v => v === 'now_playing');
