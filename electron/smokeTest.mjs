@@ -1046,7 +1046,8 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       // ...and come back when the pointer moves (reported by main, since the
       // title strip is a drag area the page never sees the pointer over)
       mainWindow.webContents.send('window:pointer-moved');
-      const back = await waitFor(chrome, v => allOpacity(v, '1'));
+      // wait for the SETTLED state: the opacities reach 1 a beat before the idle flag and inert clear
+      const back = await waitFor(chrome, v => allOpacity(v, '1') && !v.idle && !v.tabsInert && !v.exitInert);
       check(allOpacity(back, '1') && !back.idle && !back.tabsInert, `a pointer move from main brings all of it back (${JSON.stringify(back)})`);
       check(await lights(true) === true, 'the traffic lights return at once with the chrome');
       // resting the pointer on a chrome element keeps it up. A synthetic DOM event
@@ -2835,8 +2836,15 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         // animation-paused otherwise, so measuring a paused player would
         // measure nothing. Muted playback is used deliberately: Chromium allows
         // it with no user gesture, and the compositing work is identical.
-        const a = document.querySelector('audio');
-        if (a) { a.muted = true; try { await a.play(); } catch { /* policy */ } }
+        // Retry against the CURRENT element: a play() issued before the new track's source has
+        // loaded (or on an element React is about to replace) is rejected, and a slow machine
+        // (Rosetta, straight after the 20k bench) needs a few seconds for that.
+        let a = document.querySelector('audio');
+        for (let i = 0; i < 150 && !(a && !a.paused); i++) {
+          a = document.querySelector('audio');
+          if (a) { a.muted = true; try { await a.play(); } catch { /* not ready yet, or policy */ } }
+          if (!(a && !a.paused)) await sleep(100);
+        }
         window.__sonusTest.setView('now_playing');
 
         const flareCount = () => [...document.querySelectorAll('div')]
