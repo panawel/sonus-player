@@ -2982,7 +2982,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
           hasUnrelated: body.includes(${JSON.stringify(unrelated.title)}),
         };
       })()
-    `, (r) => r.hasMatch, { timeout: 4000 });
+    `, (r) => r.hasMatch, { timeout: 12000 });   // returns the moment it is there; a heavily loaded Rosetta run needs far more than 4s (x2.5) to open the page
     check(populated.hasMixKicker, 'mix: Details page shows the MIX kicker');
     check(populated.hasSeed, `mix: Details page shows the seed track's title`);
     check(populated.hasMatch, 'mix: shows the matched track from the seeded result');
