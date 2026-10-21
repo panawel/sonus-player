@@ -1166,7 +1166,9 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       const bar1 = phone ? phone.bar : 0;
       await sleep(1500);
       const bar2 = await execS(`parseFloat(document.querySelector('.chill-phone-progress > div').style.width) || 0`);
-      check(bar2 > bar1, `the phone's progress bar moves with playback (${bar1.toFixed(2)}% -> ${bar2.toFixed(2)}%)`);
+      // The fixture loops at 20s, so the bar may have wrapped from ~100% to the start between the two
+      // samples: that is movement too (a frozen bar is the failure this guards).
+      check(bar2 > bar1 || (bar1 > 60 && bar2 < 40), `the phone's progress bar moves with playback (${bar1.toFixed(2)}% -> ${bar2.toFixed(2)}%)`);
       await execS(`document.querySelector('audio').pause()`);
       const paused = await waitFor(`document.querySelector('[data-chill-phone-state]')?.dataset.chillPhoneState`, v => v === 'paused');
       check(paused === 'paused', 'the phone shows a play icon once paused');
@@ -2809,6 +2811,11 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
           // At 60Hz a frame over 20ms was dropped; a useful count on any display.
           janky: d.filter(x => x > 20).length,
         });
+
+        // The file-open above is handled asynchronously, and after the 20k-track bench the
+        // app can be busy for a good while on a slow machine (Rosetta): wait for the player's
+        // <audio> to exist instead of trusting the fixed sleep before this script.
+        for (let i = 0; i < 300 && !document.querySelector('audio'); i++) await sleep(50);
 
         // ── Baseline: Library, no overlay, no furnace ──
         window.__sonusTest.setView('library');
