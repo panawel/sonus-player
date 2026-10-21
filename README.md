@@ -6,7 +6,7 @@
 
 **A beautiful, native-feeling music player for macOS.**
 
-Glassmorphic UI, a tag editor that actually writes to disk, and it stays smooth at 20,000 tracks.
+Glassmorphic UI, a tag editor that actually writes to disk, scenes for when you just want to sit back and listen — and it stays smooth at 20,000 tracks.
 
 [![Latest release](https://img.shields.io/github/v/release/panawel/sonus-player?style=flat-square&color=0A84FF)](https://github.com/panawel/sonus-player/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/panawel/sonus-player/total?style=flat-square&color=0A84FF)](https://github.com/panawel/sonus-player/releases)
@@ -25,6 +25,17 @@ Glassmorphic UI, a tag editor that actually writes to disk, and it stays smooth 
 **[⬇ Download Sonus for macOS](https://github.com/panawel/sonus-player/releases/latest)** — universal `.dmg`, runs natively on both Intel and Apple Silicon.
 
 Open the `.dmg`, drag **Sonus** to your Applications folder, then read the next section before launching — it takes ten seconds and saves confusion.
+
+### What's new in 1.7
+
+- **[Chill mode](#chill-mode)** — turn Now Playing into a scene: a spinning turntable, a hammock by the sea, or a rainy study room. Rain, waves, lightning, and the song's own lyrics typed out on a laptop.
+- **[Three window modes](#one-window-three-shapes)** — normal, phone-narrow, and a tiny mini player, switchable from the **File** menu or by simply resizing.
+- **[A real menu bar](#menus-and-shortcuts)** — a rebuilt **File** menu and a new **Controls** menu, with keyboard shortcuts for everything.
+- **[Search](#search)** is now a floating panel (`⌘F`) over whatever page you're on.
+- **[A clearer add-songs dialog](#adding-music)** that says what each choice does, and works in every window size.
+- **A calmer track list** — white selection, animated "now playing" bars, a footer with the song count and total time, and a refreshed icon.
+
+---
 
 ## Opening Sonus the first time
 
@@ -55,7 +66,7 @@ xattr -dr com.apple.quarantine /Applications/Sonus.app
 Every release publishes **SHA-256 checksums** so you can verify your download matches what was built:
 
 ```bash
-shasum -a 256 ~/Downloads/Sonus-1.0.0-universal.dmg
+shasum -a 256 ~/Downloads/Sonus-1.7.0-universal.dmg
 ```
 
 > Prefer not to run unsigned software? [Build it yourself](#building-from-source) — it's four commands.
@@ -66,9 +77,9 @@ shasum -a 256 ~/Downloads/Sonus-1.0.0-universal.dmg
 
 ### A real music library, not a file list
 
-Drop a folder in and Sonus reads the tags, extracts cover art, and builds a browsable library. Sorting is driven by clicking a column — no menus. Multi-select with `⇧`/`⌘`, drag to reorder, delete with `⌫`.
+Drop a folder in and Sonus reads the tags, extracts cover art, and builds a browsable library. Sorting is driven by clicking a column — no menus. Multi-select with `⇧`/`⌘`, drag to reorder, delete with `⌫`. The song playing right now is marked with animated bars where its number would be, the selection is a clean white ring, and a footer under the list tells you how many songs you're looking at and how long they run.
 
-**It stays fast when the library gets big.** Every screenshot here is a real ~4,400-track library, and the track list is fully virtualized: at 20,000 tracks fewer than 80 rows exist in the DOM at any moment, and re-sorting the whole library is effectively instant. Album art never lives in memory as base64 — tracks carry a thumbnail reference, and full-resolution art is loaded only when something actually displays it.
+**It stays fast when the library gets big.** Every screenshot here is a real ~4,000-track library, and the track list is fully virtualized: at 20,000 tracks fewer than 80 rows exist in the DOM at any moment, and re-sorting the whole library is effectively instant. Album art never lives in memory as base64 — tracks carry a thumbnail reference, and full-resolution art is loaded only when something actually displays it.
 
 <img src="docs/assets/library.png" alt="Library view" width="860">
 
@@ -78,30 +89,82 @@ Not a dashboard for its own sake: every panel is a way into your music. A rotati
 
 <img src="docs/assets/home.png" alt="Home view" width="860">
 
-Further down, your library as data: songs by year, a sound-quality breakdown by bitrate, how complete your metadata actually is, and a language split. Every segment is clickable — tap the 128 kbps slice to see exactly which tracks are dragging your library down, or the 2,192 missing lyrics to go fix them.
+Further down, your library as data: songs by year, a sound-quality breakdown by bitrate, how complete your metadata actually is, and a language split. Every segment is clickable — tap the 128 kbps slice to see exactly which tracks are dragging your library down, or the missing lyrics to go fix them.
 
 <img src="docs/assets/stats.png" alt="Library statistics — songs by year, sound quality, completeness and languages" width="860">
 
-Click any artist, album, year or quality tier and you land on its own page, with the same track list engine and a Play All / Shuffle header.
+Click any artist, album, year or quality tier and you land on its own page, with the same track list engine, a Play All / Shuffle header, and a right-click menu for Play Next, Start Mix, Edit Tags, Reveal in Finder and more.
 
-<img src="docs/assets/artist.png" alt="Artist detail view" width="860">
+<img src="docs/assets/details.png" alt="Artist details page with the track context menu" width="860">
+
+### Search
+
+`⌘F` (or the search button) opens a floating panel over whatever page you're on: artists, albums and songs from your whole library — or just the page you're looking at, when you're on a details page. The list behind it filters live as you type.
 
 ### Now Playing
 
-Full-screen artwork with an ambient colour wash sampled from the cover, and embedded lyrics in a side panel — with right-to-left script detection, so Hebrew and Arabic lyrics render correctly instead of backwards.
+Full-window artwork with an ambient colour wash sampled from the cover, and embedded lyrics in a side panel — with right-to-left script detection, so Hebrew and Arabic lyrics render correctly instead of backwards.
 
-<img src="docs/assets/now-playing.png" alt="Now Playing with lyrics" width="860">
+<img src="docs/assets/now-playing-lyrics.png" alt="Now Playing with lyrics" width="860">
 
-### Resizes down to phone width
+The player floats at the bottom of every page as a glass pill: artwork, seek line, and transport controls. **Shuffle** and **repeat** show a small dot under the icon when they're on, so you can tell at a glance.
 
-The window isn't locked to one desktop shape — it resizes all the way down to phone-portrait proportions (as narrow as ~380px). Below that point the whole interface reflows rather than just shrinking: Search/Add/Library/Home collapse to a single icon-only pill, the player collapses to a compact bar with cover art and playback controls, and Now Playing switches to a single-column view with a tab for lyrics. Same library, same tag editor, same controls — just narrower.
+### Chill mode
 
-<p>
-<img src="docs/assets/narrow-home.png" alt="Home at phone-portrait width" width="300">
-<img src="docs/assets/narrow-library.png" alt="Library at phone-portrait width" width="300">
-<img src="docs/assets/artist-narrow.png" alt="Artist detail view at phone-portrait width" width="300">
-<img src="docs/assets/narrow-now-playing.png" alt="Now Playing at phone-portrait width" width="300">
+At full width, one click (or **File → Chill Mode**, `⇧⌘C`) turns Now Playing into a scene, picked from a small popup. The song's artwork is part of every one:
+
+- **The turntable** — the artwork becomes the spinning record.
+- **The hammock** — the artwork is the screen of a phone held by someone swinging by the sea. The palms sway, the sea shimmers, waves wash up the shore, and the whole hammock rocks.
+- **The study room** — the artwork hangs on the posters and polaroids of a rainy room. Rain runs down the window, lightning flashes now and then, steam rises from the mug, and a girl types — and stops — to your music. On her laptop's screen: the song's own lyrics, when it has them.
+
+<div align="center">
+<img src="docs/assets/chill-mode.gif" alt="Chill mode — the turntable scene" width="800">
+</div>
+
+A minimal bar fades away (traffic lights and all) when you stop moving the mouse, and the framing adapts to any window size.
+
+### One window, three shapes
+
+The window isn't locked to one desktop shape. Pick a shape from the **File** menu — or just drag the window's edge:
+
+| | Size | What changes |
+| --- | --- | --- |
+| **Filled Screen Mode** | fills the screen | the full desktop layout |
+| **Narrow Mode** | 440 × 760 | a phone-portrait layout: icon-only tabs, a compact player, and a single-column Now Playing with a Song/Lyrics switch |
+| **Mini Mode** | 380 × 200 | just the artwork, track, seek line and transport controls |
+
+Same library, same tag editor, same controls — just narrower. Make a window short and it becomes the mini player; make it tall again and you're back exactly where you were.
+
+<p align="center">
+<img src="docs/assets/narrow-home.png" alt="Home at phone-portrait width" width="200">
+<img src="docs/assets/narrow-library.png" alt="Library at phone-portrait width" width="200">
+<img src="docs/assets/narrow-details.png" alt="Artist details page at phone-portrait width" width="200">
+<img src="docs/assets/narrow-now-playing.png" alt="Now Playing at phone-portrait width" width="200">
 </p>
+
+<p align="center">
+<img src="docs/assets/mini-mode.png" alt="The mini player" width="380">
+</p>
+
+### Adding music
+
+Drag files or folders onto the window, press `⌘O`, or use the **+** button. If your library already has songs, Sonus asks what you want — and tells you, on hover, exactly what each choice does:
+
+- **Play now** — replaces your current library with these songs and starts playing
+- **Play next** — right after the current song
+- **Add to queue** — at the end of your library
+
+The dialog has its own compact layout for the mini player, and you can still drag the window around while it's open.
+
+### Menus and shortcuts
+
+Everything is in the menu bar, with shortcuts that stay out of the way of typing (Space still types a space in a search box).
+
+| | |
+| --- | --- |
+| **File** | Add Music `⌘O` · Filled Screen Mode `⌃⌘M` · Narrow Mode `⌥⌘2` · Mini Mode `⌥⌘3` · Chill Mode `⇧⌘C` |
+| **Controls** | Play/Pause `Space` · Next `⌥⌘→` · Previous `⌥⌘←` · Shuffle `⇧⌘S` · Repeat `⌥⌘R` (off / all / one) · Go to Current Song `⌘L` |
+| **Anywhere** | Search `⌘F` · Select all `⌘A` · Remove from list `⌫` · Seek ±5 s `←` `→` · Leave mini player or Chill mode `Esc` |
 
 ### A tag editor that writes to the file
 
@@ -178,11 +241,13 @@ npm run lint
 ./scripts/verify-bundle.sh   # structural checks on a packaged .app
 ```
 
-There's also an end-to-end smoke suite that runs against the **built** app — real Electron, real Chromium — covering the metadata pipeline, tag round-trips for all three writable formats, launch behaviour, the tracklist UI, and a 20,000-track performance bench:
+There's also an end-to-end smoke suite that runs against the **built** app — real Electron, real Chromium — covering the metadata pipeline, tag round-trips for all three writable formats, launch behaviour, the track list, every window mode, the menus, Chill mode's scenes, and a 20,000-track performance bench:
 
 ```bash
 npx vite build && npx electron . --smoke
 ```
+
+While developing, run just the part you touched: `npx electron . --smoke --only=menus`.
 
 See [`BUILD_INSTRUCTIONS.md`](BUILD_INSTRUCTIONS.md) for the full packaging walkthrough.
 
@@ -190,7 +255,7 @@ See [`BUILD_INSTRUCTIONS.md`](BUILD_INSTRUCTIONS.md) for the full packaging walk
 
 Electron main process, a preload bridge, and a React 19 renderer, with strict separation between them — the renderer has no Node access and every capability it has is declared explicitly in the preload.
 
-If you're curious how it's put together, [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is a genuine deep dive: how the metadata index and thumbnail cache keep large libraries cheap, why the tracklist column header lives outside the scroll container, how launch arbitration decides what library you get when you double-click a file, and a number of hard-won constraints that fail silently if you break them.
+If you're curious how it's put together, [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is a genuine deep dive: how the metadata index and thumbnail cache keep large libraries cheap, why the track list's column header lives outside the scroll container, how launch arbitration decides what library you get when you double-click a file, how Chill mode's animated scenes are built, and a number of hard-won constraints that fail silently if you break them.
 
 ## Built with
 
