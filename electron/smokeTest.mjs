@@ -902,7 +902,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     await waitFor(`!!document.querySelector('.search-panel-tile')`, v => v === true);
     await exec(`document.querySelector('.search-panel-tile').click()`);
     const toDetail = await waitFor(`({ view: window.__sonusTest.getView(), detail: !!document.querySelector('.detail-play-button'), panel: !!document.querySelector('.search-panel'), back: (document.querySelector('.np-back-button') || {}).textContent || '' })`,
-      v => v && v.detail);
+      v => v && v.detail && v.panel === false && v.back !== '');   // wait for the settled state: the panel closes a beat after the page appears
     check(toDetail?.view === 'home' && toDetail?.panel === false && toDetail?.back.includes('Now Playing'),
       `an artist result opens its page, closes the panel, and offers a way back to Now Playing (${JSON.stringify(toDetail)})`);
     await exec(`window.__sonusTest.closeDetail(); window.__sonusTest.setView('library')`);
@@ -1219,12 +1219,22 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         `the artwork is on ${posters?.n} posters, as the image only, in perspective, in ${posters?.looks} different looks (${JSON.stringify(posters)})`);
       check(await execS(`!!document.querySelector('[data-chill-laptop]')`), 'the laptop shows a live document');
 
-      // lightning, every so often: the first within ~5s of the scene appearing; posters and laptop flash with it
+      // lightning, every so often: the first 4.5s after the scene appears, then one every 11-26s;
+      // posters and laptop flash with it. The earlier checks above take longer the slower the machine
+      // (they run for ~10s under Rosetta), so by the time this loop starts the first flash may
+      // already be over and the next is up to 26s away: wait for the flash itself, not for a fixed
+      // few seconds, and poll in real time (a flash peaks for ~150ms; a scaled sleep missed it).
+      // That the FIRST flash comes ~4.5s in is unit-tested (chillRoom.test.js).
       const flashOf = `(() => { const o = document.querySelector('[data-chill-room-overlays]'); return o ? Number(o.dataset.flash || 0) : -1; })()`;
       let flashMax = 0, flashSeenDark = false, flashDroppedAgain = false;
-      const flashEnd = Date.now() + 14000;
-      while (Date.now() < flashEnd) { const f = await execS(flashOf); if (f <= 0.02) { flashSeenDark = true; if (flashMax > 0.5) flashDroppedAgain = true; } flashMax = Math.max(flashMax, f); await sleep(40); }
-      check(flashMax > 0.5, `a lightning flash lights the room within a few seconds (peak ${flashMax})`);
+      const flashEnd = Date.now() + 34000;
+      while (Date.now() < flashEnd && !(flashMax > 0.5 && flashDroppedAgain)) {
+        const f = await execS(flashOf);
+        if (f <= 0.02) { flashSeenDark = true; if (flashMax > 0.5) flashDroppedAgain = true; }
+        flashMax = Math.max(flashMax, f);
+        await new Promise(r => setTimeout(r, 40));
+      }
+      check(flashMax > 0.5, `a lightning flash lights the room (peak ${flashMax}; waited up to 34s for one)`);
       check(flashSeenDark && flashDroppedAgain, 'and the room goes dark again after it');
       const flashStyle = await execS(`(() => { const o = document.querySelector('[data-chill-room-overlays]'); return { var: getComputedStyle(o).getPropertyValue('--flash'), poster: !!document.querySelector('[data-chill-poster]') }; })()`);
       check(flashStyle.var !== '' && flashStyle.poster, 'the posters and the laptop read the same flash variable');
