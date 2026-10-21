@@ -1351,7 +1351,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       await waitFor(`!!document.querySelector('.chill-picker')`, v => v === true);
       check(await execS(`document.querySelector('.chill-picker-item.active')?.dataset.sceneId`) === 'room', 'the picker marks the study room as current');
       await execS(`document.querySelector('.chill-picker-item[data-scene-id="turntable"]').click()`);
-      const back = await waitFor(`({ scene: document.querySelector('.chill-scene')?.dataset.scene, disc: !!document.querySelector('.chill-disc'), living: !!document.querySelector('.chill-living'), saved: window.localStorage.getItem('sonus.chillScene') })`, v => v && v.scene === 'turntable');
+      const back = await waitFor(`({ scene: document.querySelector('.chill-scene')?.dataset.scene, disc: !!document.querySelector('.chill-disc'), living: !!document.querySelector('.chill-living'), saved: window.localStorage.getItem('sonus.chillScene') })`, v => v && v.scene === 'turntable' && v.disc && !v.living && v.saved === 'turntable');   // the disc mounts a beat after the scene attribute flips
       check(back && back.disc && !back.living && back.saved === 'turntable', `switching back restores the turntable and drops the animated photo (${JSON.stringify(back)})`);
 
       await execS(`window.__sonusTest.setChillMode(false)`);
@@ -2798,6 +2798,12 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
           };
           requestAnimationFrame(tick);
         });
+        // Before each measurement, wait until the page is actually idle enough to draw frames
+        // (>= 12 in a 400ms window; ~21 at 60Hz): right after the 20k-track bench or a scene
+        // switch a slow machine (Rosetta) is still busy, and sampling then measures the cleanup,
+        // not the view - it made the "collected samples" sanity checks fail. Proceeds after ~16s
+        // regardless, so a machine that never settles still reports its real numbers.
+        const settle = async () => { for (let i = 0; i < 40; i++) { if ((await sampleFrames(400)).length >= 12) return; } };
         const pctl = (arr, p) => {
           if (!arr.length) return null;
           const s = [...arr].sort((a, b) => a - b);
@@ -2820,6 +2826,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         // ── Baseline: Library, no overlay, no furnace ──
         window.__sonusTest.setView('library');
         await sleep(700);
+        await settle();
         out.baseline = summarize(await sampleFrames(1500));
 
         // ── Stress: Now Playing with the furnace live ──
@@ -2841,6 +2848,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         out.artworkPresent = !!document.querySelector('.np-artwork');
         // The furnace wrapper fades in over 1.5s; measure the settled state.
         await sleep(1700);
+        await settle();
         out.nowPlaying = summarize(await sampleFrames(2500));
 
         // ── Chill mode: the photo + the spinning record, no furnace ──
@@ -2850,18 +2858,21 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         for (let i = 0; i < 120 && spinState() !== 'running'; i++) await sleep(50);
         out.chillSpinning = spinState() === 'running';
         await sleep(1500);
+        await settle();
         out.chill = summarize(await sampleFrames(2500));
         // ── Chill mode, hammock scene: the photo drawn by WebGL every frame ──
         window.__sonusTest.setChillScene('beach');
         for (let i = 0; i < 120 && document.querySelector('.chill-living')?.dataset.live !== 'true'; i++) await sleep(50);
         out.chillBeachLive = document.querySelector('.chill-living')?.dataset.live === 'true';
         await sleep(1500);
+        await settle();
         out.chillBeach = summarize(await sampleFrames(2500));
         // ── Chill mode, study room: rain, typing, breathing and lights, drawn by WebGL every frame ──
         window.__sonusTest.setChillScene('room');
         for (let i = 0; i < 120 && document.querySelector('.chill-living')?.dataset.live !== 'true'; i++) await sleep(50);
         out.chillRoomLive = document.querySelector('.chill-living')?.dataset.live === 'true';
         await sleep(1500);
+        await settle();
         out.chillRoom = summarize(await sampleFrames(2500));
         window.__sonusTest.setChillScene('turntable');
         window.__sonusTest.setChillMode(false);
