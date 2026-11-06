@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import cx from 'classnames';
 import { MoreVertical } from 'lucide-react';
 import { MarqueeLine } from './MiniPlayer.jsx';
@@ -6,6 +6,11 @@ import { computeFraming } from './chillGeometry.js';
 import ChillTurntable from './ChillTurntable.jsx';
 import ChillBeach from './ChillBeach.jsx';
 import ChillRoom from './ChillRoom.jsx';
+import { getChillScene } from './chillScenes.js';
+import {
+  transitionReducer, initialTransition, isTransitionLoading,
+  CHILL_FADE_MS, CHILL_FADE_REDUCED_MS, CHILL_LOAD_TIMEOUT_MS,
+} from './chillTransition.js';
 
 // Chill mode — full-width Now Playing as a scene: a photo fills the WHOLE WINDOW
 // (a fixed full-bleed layer like the mini player's, so it covers the title strip
@@ -28,12 +33,58 @@ import ChillRoom from './ChillRoom.jsx';
 // pixel size), scaled and shifted as a unit, so overlays stay glued to the photo
 // at every window size. The layers and why they are ordered as they are are in
 // docs/ARCHITECTURE.md ("Chill mode").
+//
+// Switching scenes (chillTransition.js): this component stays mounted - the bar
+// never blinks - and each scene is a LAYER. The one on screen keeps running while
+// the requested one loads hidden behind it (photo decoded, textures uploaded, first
+// frame drawn: its `onReady`), and only then does it crossfade in. The same holds
+// for the first scene: the whole Chill layer fades in once it is ready, instead of
+// a brown box and a photo popping in.
+
+// One scene's stage. `role`: 'current' (on screen), 'loading' (hidden, preparing),
+// 'in' (fading in over the current one).
+function SceneLayer({ sceneId, seq, role, box, shared, onReady }) {
+  const scene = getChillScene(sceneId);
+  const framing = useMemo(() => computeFraming(box.w, box.h, box.dpr, scene.framing), [box, scene]);
+  const handleReady = useCallback(() => onReady(sceneId, seq), [onReady, sceneId, seq]);
+  const { arts, currentTrack, artworkRgb, isPlaying, shown, duration, formatTime, onTogglePlay, labelRgb } = shared;
+  return (
+    <div
+      className={cx('chill-layer', `chill-layer--${role}`)}
+      data-layer-scene={sceneId}
+      data-layer-role={role}
+      inert={role === 'loading' ? true : undefined}
+    >
+      <div
+        className="chill-stage"
+        style={{ width: scene.framing.sceneW, height: scene.framing.sceneH, transform: `translate(${framing.tx}px, ${framing.ty}px) scale(${framing.k})` }}
+      >
+        {scene.kind === 'turntable' && (
+          <ChillTurntable photoUrl={scene.photo} arts={arts} isPlaying={isPlaying} labelRgb={labelRgb} onTogglePlay={onTogglePlay} onReady={handleReady} />
+        )}
+        {scene.kind === 'room' && (
+          <ChillRoom scene={scene} framing={framing} dpr={box.dpr} arts={arts} isPlaying={isPlaying} lyrics={currentTrack?.lyrics ?? null} trackKey={currentTrack?.filePath} title={currentTrack?.title || ''} artist={currentTrack?.artist || ''} onReady={handleReady} />
+        )}
+        {scene.kind === 'beach' && (
+          <ChillBeach
+            scene={scene} framing={framing} dpr={box.dpr}
+            arts={arts} artworkRgb={artworkRgb}
+            title={currentTrack?.title || ''} artist={currentTrack?.artist || ''}
+            shown={shown} duration={duration || 0} isPlaying={isPlaying} formatTime={formatTime}
+            onReady={handleReady}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ChillScene({
   scene, currentTrack, artSrc, isPlaying, artworkRgb,
   currentTime, duration, isSeeking, seekValue,
   onSeekChange, onSeekMouseDown, onSeekMouseUp,
   formatTime, renderTransport, marqueeFadeMask,
-  onTogglePlay, onExit, exitOnEscape, chromeVisible, onOpenMenu,
+  onTogglePlay, onExit, exitOnEscape, chromeVisible, onOpenMenu, onLoadingChange,
 }) {
   const rootRef = useRef(null);
 
@@ -53,9 +104,41 @@ export default function ChillScene({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const framing = useMemo(() => computeFraming(box.w, box.h, box.dpr, scene.framing), [box, scene]);
-  // The stage only mounts once the first size is known.
+  // The stages only mount once the first size is known.
   const ready = box.w > 0;
+
+  // ── which scene is on screen, which is loading ──────────────────────────
+  const [tState, dispatch] = useReducer(transitionReducer, scene.id, initialTransition);
+  useEffect(() => { dispatch({ type: 'request', sceneId: scene.id }); }, [scene.id]);
+  // A layer reports ready when its first frame is DRAWN; two animation frames later
+  // it has actually reached the screen, which is when it is safe to start showing it.
+  const onLayerReady = useCallback((sceneId, seq) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => dispatch({ type: 'ready', sceneId, seq })));
+  }, []);
+  // A scene that never reports ready (a stalled load, a lost context) is shown anyway.
+  useEffect(() => {
+    if (!tState.target || tState.fading) return undefined;
+    const { sceneId, seq } = tState.target;
+    const timer = setTimeout(() => dispatch({ type: 'ready', sceneId, seq }), CHILL_LOAD_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [tState.target, tState.fading]);
+  const fadeMs = useMemo(
+    () => (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? CHILL_FADE_REDUCED_MS : CHILL_FADE_MS), []);
+  useEffect(() => {
+    if (!tState.fading) return undefined;
+    const timer = setTimeout(() => dispatch({ type: 'faded' }), fadeMs + 60);
+    return () => clearTimeout(timer);
+  }, [tState.fading, fadeMs]);
+  // The scene button's spinner (App.jsx) follows this.
+  const loading = isTransitionLoading(tState);
+  const onLoadingChangeRef = useRef(onLoadingChange);
+  onLoadingChangeRef.current = onLoadingChange;
+  useEffect(() => { onLoadingChangeRef.current?.(loading); }, [loading]);
+  useEffect(() => () => onLoadingChangeRef.current?.(false), []);
+  const shownSceneId = tState.current?.sceneId ?? tState.target?.sceneId ?? scene.id;
+  const layers = [];
+  if (tState.current) layers.push({ ...tState.current, role: 'current' });
+  if (tState.target) layers.push({ ...tState.target, role: tState.fading ? 'in' : 'loading' });
 
   // ── artwork, crossfading between tracks ────────────────────────────────
   const [arts, setArts] = useState(() => [{ id: 0, src: artSrc }]);
@@ -86,30 +169,18 @@ export default function ChillScene({
   return (
     <div
       ref={rootRef}
-      className={cx('chill-scene', `chill-scene--${scene.id}`, { 'chill-scene--idle': !chromeVisible })}
-      data-scene={scene.id}
+      className={cx('chill-scene', `chill-scene--${shownSceneId}`, { 'chill-scene--idle': !chromeVisible, 'chill-scene--waiting': !tState.current })}
+      style={{ '--chill-fade': `${fadeMs}ms` }}
+      data-scene={shownSceneId}
+      data-chill-state={tState.fading ? 'fading' : tState.target ? 'loading' : 'ready'}
     >
-      {ready && (
-        <div
-          className="chill-stage"
-          style={{ width: scene.framing.sceneW, height: scene.framing.sceneH, transform: `translate(${framing.tx}px, ${framing.ty}px) scale(${framing.k})` }}
-        >
-          {scene.kind === 'turntable' && (
-            <ChillTurntable photoUrl={scene.photo} arts={arts} isPlaying={isPlaying} labelRgb={labelRgb} onTogglePlay={onTogglePlay} />
-          )}
-          {scene.kind === 'room' && (
-            <ChillRoom scene={scene} framing={framing} dpr={box.dpr} arts={arts} isPlaying={isPlaying} lyrics={currentTrack?.lyrics ?? null} />
-          )}
-          {scene.kind === 'beach' && (
-            <ChillBeach
-              scene={scene} framing={framing} dpr={box.dpr}
-              arts={arts} artworkRgb={artworkRgb}
-              title={currentTrack?.title || ''} artist={currentTrack?.artist || ''}
-              shown={shown} duration={duration || 0} isPlaying={isPlaying} formatTime={formatTime}
-            />
-          )}
-        </div>
-      )}
+      {ready && layers.map((l) => (
+        <SceneLayer
+          key={`${l.sceneId}:${l.seq}`} sceneId={l.sceneId} seq={l.seq} role={l.role}
+          box={box} onReady={onLayerReady}
+          shared={{ arts, currentTrack, artworkRgb, isPlaying, shown, duration, formatTime, onTogglePlay, labelRgb }}
+        />
+      ))}
 
       <div className="chill-scrim" />
 

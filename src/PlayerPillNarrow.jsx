@@ -1,4 +1,4 @@
-import { Play, Pause, SkipForward, Music } from 'lucide-react';
+import { Play, Pause, SkipForward, Music, MoreVertical } from 'lucide-react';
 import cx from 'classnames';
 import usePillPhase from './usePillPhase';
 
@@ -60,7 +60,7 @@ export default function PlayerPillNarrow({
   isHoldingPlayPause,
   playNext,
   onPlayPauseClick, onPlayPausePressStart, onPlayPausePressEnd,
-  onTap,
+  onTap, onOpenMenu,
   artworkRgb,
 }) {
   const shouldShow = !!currentTrack && (!isNowPlayingOpen || isLyricsOpen);
@@ -159,6 +159,19 @@ export default function PlayerPillNarrow({
           >
             <SkipForward size={NEXT_ICON_SIZE} fill="currentColor" />
           </button>
+          {/* The track menu, last — the same menu every other player opens (App.jsx renders it once). */}
+          {onOpenMenu && (
+            <button
+              className="player-control-button clickable"
+              title="More"
+              aria-label="More"
+              data-pill-menu-btn
+              style={{ padding: 10, color: 'var(--chrome-text)', flexShrink: 0 }}
+              onClick={(e) => { e.stopPropagation(); onOpenMenu(e); }}
+            >
+              <MoreVertical size={NEXT_ICON_SIZE} />
+            </button>
+          )}
         </div>
       </div>
     </div>

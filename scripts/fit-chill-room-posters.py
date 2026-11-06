@@ -27,7 +27,7 @@ and for prints whose fit is right to the eye but moved more than MAX_DRIFT from 
 seed, `--adopt id,...` makes the current (reviewed) quad the new seed and re-fits from there.
 A side the detector cannot see (dark picture against a dark shadow, white print on a white
 mat) can be pinned with `"hold": ["top"]` in the JSON: that side keeps the seed's line and
-counts as hand-verified. `"trust": ["bottom"]` skips only the outer-edge check on a side whose
+counts as hand-verified. `"min_strength": 3.5` lowers the edge-steepness bar (4 levels/px) for one print whose soft edge was checked by eye. `"trust": ["bottom"]` skips only the outer-edge check on a side whose
 fit was confirmed by eye at 6x+ (a false positive from a neighbouring frame).
 A print PASSES only if every side checks out (and has no STRONGER edge of the same direction 4-16px
 outside it — a sign the seed sat on an interior edge such as lettering): scatter <= 0.7px, >= 60% of samples inliers,
@@ -230,6 +230,10 @@ def fit_poster(p):
     global HOLD, TRUST
     HOLD = tuple(p.get('hold', ()))
     TRUST = tuple(p.get('trust', ()))
+    # A soft edge (a pale sticky on a beige wall) can be a hair under the usual 4 levels/px yet fit
+    # perfectly; `"min_strength": 3.5` in the JSON lowers the bar for THAT print only, after the fit
+    # was checked by eye on the overlay.
+    min_strength = float(p.get('min_strength', 4.0))
     seed = [tuple(c) for c in p['seed']]
     quad = list(seed)
     centre = (sum(c[0] for c in seed) / 4, sum(c[1] for c in seed) / 4)
@@ -265,7 +269,7 @@ def fit_poster(p):
             sides.append({'frame': True}); continue
         peak, mean_g = side_peak_offset(a, b, centre)
         outer = None if SIDE_NAMES[i] in TRUST else outer_edge_check(a, b, centre)
-        good = bool(info) and info['rms'] <= 0.7 and info['inlier'] >= 0.6 and info['strength'] >= 4.0 and abs(peak) <= 0.5 and outer is None
+        good = bool(info) and info['rms'] <= 0.7 and info['inlier'] >= 0.6 and info['strength'] >= min_strength and abs(peak) <= 0.5 and outer is None
         ok = ok and good
         if info:
             sigmas.append(info['sigma'])
@@ -277,16 +281,19 @@ def fit_poster(p):
     return quad, {'ok': ok, 'blur': round(max(0.4, min(5.0, sigma)), 2), 'shift': round(max(shift), 1), 'sides': sides}
 
 
-def write(data):
-    with open(POSTERS, 'w') as f:
-        f.write('{\n  "_doc": %s,\n  "posters": [\n' % json.dumps(data['_doc']))
+def items(data):
+    """The prints (artwork goes on them) and the notes (lyrics go on them): fitted the same way."""
+    return list(data['posters']) + list(data.get('notes', []))
+
+
+def _rows(lst):
         rows = []
-        for p in data['posters']:
-            q = {k: p[k] for k in ('id', 'look') if k in p}
+        for p in lst:
+            q = {k: p[k] for k in ('id', 'look', 'kind') if k in p}
             for k in ('zoom', 'at', 'glare'):
                 if k in p:
                     q[k] = p[k]
-            for k in ('hold', 'trust'):
+            for k in ('hold', 'trust', 'min_strength'):
                 if k in p:
                     q[k] = p[k]
             q['seed'] = p['seed']
@@ -295,9 +302,22 @@ def write(data):
                 q['fit'] = p['fit']
             if 'light' in p:
                 q['light'] = p['light']
+            if 'paper' in p:
+                q['paper'] = p['paper']
             rows.append('    ' + json.dumps(q, separators=(', ', ': ')))
-        f.write(',\n'.join(rows))
-        f.write('\n  ]\n}\n')
+        return rows
+
+
+def write(data):
+    with open(POSTERS, 'w') as f:
+        f.write('{\n  "_doc": %s,\n  "posters": [\n' % json.dumps(data['_doc']))
+        f.write(',\n'.join(_rows(data['posters'])))
+        f.write('\n  ]')
+        if data.get('notes'):
+            f.write(',\n  "notes": [\n')
+            f.write(',\n'.join(_rows(data['notes'])))
+            f.write('\n  ]')
+        f.write('\n}\n')
 
 
 def self_test():
@@ -320,21 +340,21 @@ def main():
     data = json.load(open(POSTERS))
     if '--adopt' in sys.argv:
         for pid in sys.argv[sys.argv.index('--adopt') + 1].split(','):
-            for p in data['posters']:
+            for p in items(data):
                 if p['id'] == pid:
                     p['seed'] = p['quad']
-    for p in data['posters']:
+    for p in items(data):
         if 'seed' not in p:
             p['seed'] = p['quad']          # first run: the hand-placed quad becomes the seed
         quad, fit = fit_poster(p)
         p['quad'] = quad
         p['fit'] = fit
     write(data)
-    n_ok = sum(1 for p in data['posters'] if p['fit']['ok'])
-    print(f'{n_ok}/{len(data["posters"])} prints fitted within tolerance; wrote {POSTERS}')
+    n_ok = sum(1 for p in items(data) if p['fit']['ok'])
+    print(f'{n_ok}/{len(items(data))} prints and notes fitted within tolerance; wrote {POSTERS}')
     if '--report' in sys.argv or True:
         print(f"{'id':10s} ok  blur  seed->fit shift   sides: rms/strength/peak")
-        for p in data['posters']:
+        for p in items(data):
             f = p['fit']
             side = '  '.join('frame' if s.get('frame') else f"{s['rms']}/{s['strength']}/{s['peak']:+.1f}{'' if s['ok'] else '!'}{('@out' + str(s['outer'])) if s.get('outer') else ''}" for s in f['sides'])
             print(f"{p['id']:10s} {'yes' if f['ok'] else 'NO ':3s} {f['blur']:4.1f}  {f['shift']:5.1f}px            {side}")
@@ -343,7 +363,7 @@ def main():
         out = sys.argv[sys.argv.index('--overlay') + 1]
         os.makedirs(out, exist_ok=True)
         photo = Image.open(SRC).convert('RGB')
-        for p in data['posters']:
+        for p in items(data):
             xs = [x for x, _ in p['quad']]; ys = [y for _, y in p['quad']]
             pad, z = 14, 4
             x0, y0, x1, y1 = int(min(xs)) - pad, max(0, int(min(ys)) - pad), int(max(xs)) + pad, int(max(ys)) + pad

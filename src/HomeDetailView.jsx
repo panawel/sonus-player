@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useLayoutEffect, useMemo } from 'react';
-import { Music, Play, Shuffle, ChevronLeft, Calendar, Headphones, AlertCircle, LoaderCircle, Sparkles } from 'lucide-react';
+import { Music, Play, Shuffle, Calendar, Headphones, AlertCircle, LoaderCircle, Sparkles } from 'lucide-react';
 import TrackList from './TrackList.jsx';
 import TrackListHeader from './TrackListHeader.jsx';
 import { useTrackSort } from './useTrackSort.js';
@@ -8,7 +8,7 @@ import { useIsNarrow } from './useIsNarrow.js';
 import { useMix } from './useMix.js';
 import {
   ULTRA_COMPACT_PANEL_BREAKPOINT, LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT,
-  NARROW_LAYOUT_BREAKPOINT, extraColumnFitCount, detailExtraColumns, trackMatchesQuery,
+  NARROW_LAYOUT_BREAKPOINT, TITLE_STRIP_HEIGHT, extraColumnFitCount, detailExtraColumns, trackMatchesQuery,
 } from './trackUtils.js';
 
 const MISSING_TITLES = { art: 'Missing Art', year: 'Missing Year', lyrics: 'Missing Lyrics' };
@@ -72,7 +72,7 @@ function formatDuration(sec) {
   return `${m}m`;
 }
 
-export default function HomeDetailView({ item, library, currentTrack, isPlaying, playTrack, togglePlay, playAllTracks, onShowMenu, onRemoveTracks, onBack, backLabel = 'Home', savedScrollTop = 0, onScrollChange, density, onDensityChange, selectionRegistryRef, bottomClearance = 0, searchQuery = '', onTracksChange }) {
+export default function HomeDetailView({ item, library, currentTrack, isPlaying, playTrack, togglePlay, playAllTracks, onShowMenu, onRemoveTracks, savedScrollTop = 0, onScrollChange, density, onDensityChange, selectionRegistryRef, bottomClearance = 0, searchQuery = '', onTracksChange }) {
   // Same extra-columns mechanism Library uses (App.jsx), just with a
   // per-page-type filter first — see detailExtraColumns in trackUtils.js for
   // which column gets suppressed on which page (e.g. no Album column on an
@@ -361,10 +361,8 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
         `linear-gradient(to top, transparent 0, black ${HERO_TEXT_FADE_WIDE}px)`,
       ].join(', ');
 
-  // Overlay content: the back button floating top-left (it left its old
-  // separate row above the hero once the hero became edge-to-edge — nothing
-  // above it to put a row in), and the eyebrow/title/subtitle/Shuffle+Play
-  // block, centered and anchored low, sitting on the image's faded zone.
+  // Overlay content: the eyebrow/title/subtitle/Shuffle+Play block (the back
+  // arrow lives in the title strip now, see App.jsx), centered and anchored low, sitting on the image's faded zone.
   // Text uses --chrome-text/--chrome-text-dim (white) — the same pair Now
   // Playing uses for text on a photo/blurred backdrop (see "Chrome text
   // colors" in ARCHITECTURE.md) — plus a soft text-shadow, since what's
@@ -377,37 +375,6 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
   const heroTextShadow = '0 1px 2px rgba(0,0,0,0.5), 0 2px 16px rgba(0,0,0,0.45)';
   const heroOverlayEl = (
     <>
-      {/* top/left: 16 (matching every other corner-anchored control in the
-          app, e.g. the pill's own menu button) was a real bug here
-          specifically: this hero bleeds flush with .glass-panel's own edges
-          (see above), and the panel itself has a 16px border-radius —
-          positioning the button at exactly (16, 16) puts its corner right at
-          the center of that curve, the single worst spot, and the rounded
-          corner clips straight across the chevron/first letter. 16px was
-          never wrong anywhere else in the app; it's only wrong here, because
-          nothing else sits flush with the panel's own outer edge the way
-          this hero does.
-          A first fix (24/28) cleared the CSS rounded-corner clip — confirmed
-          live, a real bug fixed — but the button still read as crowded
-          against the real macOS traffic lights on the user's own screen.
-          Those are native, OS-compositor-drawn (titleBarStyle: 'hiddenInset'
-          in electron/main.js) — a completely separate layer from anything
-          this app renders, which `webContents.capturePage()` cannot see at
-          all (confirmed directly: capturing this exact corner returns fully
-          transparent pixels where the traffic lights visibly are on a real
-          screen). That means this specific offset can only ever be verified
-          by looking at the real app, not from this sandbox — 36/36 pushes
-          well past a generous estimate of the traffic-light cluster's own
-          footprint, with real margin instead of a small nudge, but it hasn't
-          been pixel-confirmed the way the corner-radius fix was. */}
-      <button
-        className="np-back-button np-back-button--strong clickable"
-        style={{ position: 'absolute', top: 36, left: 36, zIndex: 2 }}
-        onClick={onBack}
-      >
-        <ChevronLeft size={16} style={{ flexShrink: 0 }} />
-        {backLabel}
-      </button>
       <div style={{
         position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 2,
         // Full-width: the text block's bottom padding is the same clearance the
@@ -544,7 +511,14 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
   );
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      {/* The hero photo runs behind the title strip (App.jsx drops the card's top
+          padding while a detail page is open), so the strip needs its own window-drag
+          band here: the page scroller above is `no-drag`. It is the FIRST child, and the
+          strip's pills come later in the document, so they carve their own area back out
+          (Electron unions later drag regions over earlier no-drag ones, and a later no-drag
+          over an earlier drag). */}
+      <div aria-hidden="true" data-detail-drag-strip style={{ position: 'absolute', top: 0, left: 0, right: 0, height: TITLE_STRIP_HEIGHT, WebkitAppRegion: 'drag' }} />
       {isNarrowLayout ? (
         <>
           {/* Full-bleed hero band at the top — flush with .glass-panel's own
@@ -562,7 +536,7 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
               back button plus a two-line title block, so the track list keeps
               some room instead of being squeezed out entirely. At 600px and
               above the clamp resolves exactly as before. */}
-          <div style={{ position: 'relative', height: 'clamp(max(230px, min(280px, calc(100vh - 320px))), 45vh, 460px)', flexShrink: 0 }}>
+          <div style={{ position: 'relative', height: `calc(clamp(max(230px, min(280px, calc(100vh - 320px))), 45vh, 460px) + ${TITLE_STRIP_HEIGHT}px)`, flexShrink: 0 }}>
             <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', WebkitMaskImage: heroMask, maskImage: heroMask }}>
               {heroBackgroundEl}
             </div>
@@ -594,7 +568,7 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
           <div style={{ position: 'relative', width: HERO_WIDTH_WIDE, flexShrink: 0, height: '100%', zIndex: 1 }}>
             {heroOverlayEl}
           </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', zIndex: 1, paddingLeft: 24, paddingRight: HERO_TRACKLIST_PAD_WIDE }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', zIndex: 1, paddingTop: TITLE_STRIP_HEIGHT, paddingLeft: 24, paddingRight: HERO_TRACKLIST_PAD_WIDE }}>
             {trackListArea}
           </div>
         </div>

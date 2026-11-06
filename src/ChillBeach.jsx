@@ -10,7 +10,7 @@ import { BEACH_W, BEACH_H, PHONE_CENTER_X, PHONE_CENTER_Y, swayRampX, swayProfil
 // translated by the same swing the shader applies to the man holding it (the
 // photo's loop reports it every frame; the style is written straight to the
 // element — re-rendering React 30 times a second for a transform would be waste).
-export default function ChillBeach({ scene, framing, dpr, arts, artworkRgb, title, artist, shown, duration, isPlaying, formatTime }) {
+export default function ChillBeach({ scene, framing, dpr, arts, artworkRgb, title, artist, shown, duration, isPlaying, formatTime, onReady }) {
   const swayRef = useRef(null);
   const onFrame = useCallback(({ dx, dy }) => {
     // the same two position weights the shader gives the hands holding the phone
@@ -22,7 +22,7 @@ export default function ChillBeach({ scene, framing, dpr, arts, artworkRgb, titl
     <>
       <ChillLivingPhoto
         photoUrl={scene.photo} fx={scene.fx}
-        sceneW={BEACH_W} sceneH={BEACH_H} scale={framing.k * dpr} onFrame={onFrame}
+        sceneW={BEACH_W} sceneH={BEACH_H} scale={framing.k * dpr} onFrame={onFrame} onReady={onReady}
       />
       <div className="chill-phone-sway" ref={swayRef}>
         <ChillPhoneScreen

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import cx from 'classnames';
+import { decodeImage } from './chillPreload.js';
 import {
   DISC_PX, SPIN_MS,
   ARM_POLYGON, PIN_POLYGON, ARM_SHADOW_POLYGON, PIN_SHADOW,
@@ -23,9 +24,22 @@ const PIN_SHADOW_CLIP = `ellipse(${PIN_SHADOW.rx}px ${PIN_SHADOW.ry}px at ${PIN_
 // The spin is a Web Animations rotation, so at steady state it runs on the
 // compositor (nothing on the main thread per frame); play/pause only ease its
 // playbackRate for a second or two (see "the spin" below for the catch).
-export default function ChillTurntable({ photoUrl, arts, isPlaying, labelRgb, onTogglePlay }) {
+export default function ChillTurntable({ photoUrl, arts, isPlaying, labelRgb, onTogglePlay, onReady }) {
   const spinRef = useRef(null);
   const animRef = useRef(null);
+
+  // Ready to be shown once the photo and the artwork on the record are decoded (the
+  // record, arm and shadows are CSS around them): ChillScene keeps this scene hidden
+  // until then, so neither pops in.
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  const artSrc = arts[arts.length - 1]?.src;
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([decodeImage(photoUrl), decodeImage(artSrc)]).then(() => { if (!cancelled) onReadyRef.current?.(); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount: later artwork changes crossfade in place
+  }, [photoUrl]);
 
   // ── the spin ───────────────────────────────────────────────────────────
   // A Web Animations rotation: at steady state it runs on the compositor.

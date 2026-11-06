@@ -18,13 +18,14 @@
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
-				<string>Add to Queue in Sonus</string>
+				<string>Sonus - Add to Queue</string>
 			</dict>
 			<key>NSMessage</key>
 			<string>runWorkflowAsService</string>
 			<key>NSSendFileTypes</key>
 			<array>
 				<string>public.audio</string>
+				<string>public.folder</string>
 			</array>
 		</dict>
 	</array>

@@ -38,6 +38,10 @@ import postersData from './chillRoomPosters.json';
 // the photo's real edge) get artwork; a print that could not be fitted keeps its original.
 export const ALL_POSTERS = postersData.posters;
 export const POSTERS = ALL_POSTERS.filter((p) => p.fit && p.fit.ok);
+// The papers on the right-hand wall (a white sheet, a yellow sticky): fitted and lit exactly like the
+// prints (same JSON, `notes`), but the song's LYRICS are written on them (ChillNotes.jsx) instead of
+// its artwork. A note that could not be fitted keeps its original handwriting.
+export const NOTES = (postersData.notes || []).filter((n) => n.fit && n.fit.ok);
 export const POSTER_LOCAL_W = 240;
 // A poster's local height follows its own shape (the quad's average aspect).
 export function posterLocalSize(quad) {

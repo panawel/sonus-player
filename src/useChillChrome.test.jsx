@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import useChillChrome, { CHILL_IDLE_MS, CHILL_LIGHTS_DELAY_MS } from './useChillChrome.js';
+import useChillChrome, { CHILL_IDLE_MS, CHILL_LIGHTS_DELAY_MS, CHILL_PAUSE_GRACE_MS } from './useChillChrome.js';
 
 describe('useChillChrome', () => {
   let api, movedCb, unsubscribed;
@@ -34,12 +34,56 @@ describe('useChillChrome', () => {
     advance(CHILL_IDLE_MS + 100);
     expect(result.current.visible).toBe(false);
     rerender({ active: true, playing: false, hold: false });
+    advance(CHILL_PAUSE_GRACE_MS + 100);   // a pause counts once it has lasted the grace period
     expect(result.current.visible).toBe(true);
     advance(CHILL_IDLE_MS * 3);
     expect(result.current.visible).toBe(true); // paused stays up
     rerender({ active: true, playing: true, hold: false });
     advance(CHILL_IDLE_MS + 100);
     expect(result.current.visible).toBe(false); // resuming restarts the quiet clock
+  });
+
+  describe('the gap between two songs', () => {
+    it('does not bring the chrome back: "paused" then "playing" again within the grace period changes nothing', () => {
+      const { result, rerender } = mount();
+      advance(CHILL_IDLE_MS + 100);
+      expect(result.current.visible).toBe(false);
+      rerender({ active: true, playing: false, hold: false });   // the song ended
+      advance(CHILL_PAUSE_GRACE_MS - 300);
+      expect(result.current.visible).toBe(false);
+      rerender({ active: true, playing: true, hold: false });    // the next one started
+      expect(result.current.visible).toBe(false);
+      advance(CHILL_IDLE_MS * 3);
+      expect(result.current.visible).toBe(false);                // and it never flashed or re-armed the clock
+    });
+
+    it('does not restart the quiet clock either: hidden-to-visible never happens, and an already-running clock keeps its schedule', () => {
+      const { result, rerender } = mount();
+      advance(CHILL_IDLE_MS - 1000);                             // 2.5s into the quiet spell
+      rerender({ active: true, playing: false, hold: false });
+      advance(500);
+      rerender({ active: true, playing: true, hold: false });    // gap of 0.5s
+      advance(1000 + 50);                                        // the ORIGINAL deadline passes
+      expect(result.current.visible).toBe(false);
+    });
+
+    it('a pause that lasts longer than the gap does show it, and resuming then restarts the quiet clock', () => {
+      const { result, rerender } = mount();
+      advance(CHILL_IDLE_MS + 100);
+      rerender({ active: true, playing: false, hold: false });
+      advance(CHILL_PAUSE_GRACE_MS + 100);
+      expect(result.current.visible).toBe(true);                 // the last song ended: playback really stopped
+      rerender({ active: true, playing: true, hold: false });
+      expect(result.current.visible).toBe(true);                 // up at once...
+      advance(CHILL_IDLE_MS - 100);
+      expect(result.current.visible).toBe(true);
+      advance(200);
+      expect(result.current.visible).toBe(false);                // ...and fades after a full quiet spell
+    });
+
+    it('mounted already paused: visible straight away (nothing to wait for)', () => {
+      expect(mount({ playing: false }).result.current.visible).toBe(true);
+    });
   });
 
   it('is held up while something is open over it (search panel, menu, dialog, picker)', () => {

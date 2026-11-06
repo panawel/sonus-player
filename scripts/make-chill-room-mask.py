@@ -112,6 +112,33 @@ def poster_light(photo, quad):
     }
 
 
+def paper_colors(photo, quad):
+    """The colour of a paper's blank surface as it is in the photo (lit and dimmed by the room):
+    the mean of its BRIGHTEST two thirds of pixels (so the ink and the ruled lines don't count),
+    taken separately on its left and right half so the light's fall-off across it is kept."""
+    xs = [p[0] for p in quad]
+    ys = [p[1] for p in quad]
+    x0, y0, x1, y1 = int(min(xs)), int(min(ys)), int(max(xs)) + 1, int(max(ys)) + 1
+    mask = Image.new('L', (x1 - x0, y1 - y0), 0)
+    ImageDraw.Draw(mask).polygon([(x - x0, y - y0) for x, y in quad], fill=255)
+    mask = mask.filter(ImageFilter.MinFilter(9))      # stay off the edges
+    crop = photo.crop((x0, y0, x1, y1))
+    px, mk = crop.load(), mask.load()
+    mid = (x1 - x0) / 2
+    halves = ([], [])
+    for y in range(y1 - y0):
+        for x in range(x1 - x0):
+            if mk[x, y] > 200:
+                c = px[x, y]
+                halves[0 if x < mid else 1].append((lum(c), c))
+
+    def bright_mean(v):
+        v.sort(key=lambda t: t[0])
+        v = [c for _, c in v[len(v) // 3:]]
+        return [round(sum(c[k] for c in v) / len(v)) for k in range(3)]
+    return {'left': bright_mean(halves[0]), 'right': bright_mean(halves[1])}
+
+
 def build_glare(data):
     photo = Image.open(SRC).convert('RGB')
     half = (W // 2, H // 2)
@@ -143,12 +170,17 @@ def build_glare(data):
 def refresh_lighting():
     photo = Image.open(SRC).convert('RGB')
     data = json.load(open(POSTERS))
-    for p in data['posters']:
+    for p in list(data['posters']) + list(data.get('notes', [])):    # the notes (lyrics papers) are lit like prints
         p['light'] = poster_light(photo, p['quad'])
+    for p in data.get('notes', []):
+        p['paper'] = paper_colors(photo, p['quad'])      # what the paper itself looks like in this light
     with open(POSTERS, 'w') as f:
         # compact one-line posters, keep it diffable
         f.write('{\n  "_doc": %s,\n  "posters": [\n' % json.dumps(data['_doc']))
         f.write(',\n'.join('    ' + json.dumps(p, separators=(', ', ': ')) for p in data['posters']))
+        if data.get('notes'):
+            f.write('\n  ],\n  "notes": [\n')
+            f.write(',\n'.join('    ' + json.dumps(p, separators=(', ', ': ')) for p in data['notes']))
         f.write('\n  ]\n}\n')
     print('refreshed lighting for', len(data['posters']), 'posters in', POSTERS)
     return data

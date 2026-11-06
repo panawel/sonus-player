@@ -113,7 +113,7 @@ done
 
 # ── 4. Finder Services resources ─────────────────────────────────────────────
 head_ "4. Finder Service bundles (extraResources)"
-for svc in "Add to Queue in Sonus.workflow" "Play Next in Sonus.workflow"; do
+for svc in "Add to Queue in Sonus.workflow" "Play Next in Sonus.workflow" "Play in Sonus.workflow"; do
   d="$APP/Contents/Resources/services/$svc"
   if [ -f "$d/Contents/document.wflow" ] && [ -f "$d/Contents/Info.plist" ]; then
     ok "$svc"

@@ -152,3 +152,52 @@ describe('installFinderServices', () => {
     expect(await exists(path.join(destDir, '.DS_Store'))).toBe(false);
   });
 });
+
+// The bundles we actually ship (electron/resources/services): what the Services
+// menu shows, and what each one accepts. Read as text: the files are plain XML
+// property lists.
+describe('the shipped Finder Service bundles', () => {
+  const root = path.join(path.dirname(new URL(import.meta.url).pathname), 'resources', 'services');
+  const read = async (bundle, file) => fs.readFile(path.join(root, bundle, 'Contents', file), 'utf-8');
+  const title = (plist) => plist.match(/<key>default<\/key>\s*<string>([^<]*)<\/string>/)?.[1];
+  const BUNDLES = {
+    'Add to Queue in Sonus.workflow': { title: 'Sonus - Add to Queue', flag: 'add-to-queue' },
+    'Play Next in Sonus.workflow': { title: 'Sonus - Play Next', flag: 'play-next' },
+    'Play in Sonus.workflow': { title: 'Sonus - Play', flag: null },
+  };
+
+  it('ships exactly these three, and nothing else', async () => {
+    expect((await fs.readdir(root)).filter(n => n.endsWith('.workflow')).sort()).toEqual(Object.keys(BUNDLES).sort());
+  });
+
+  it.each(Object.entries(BUNDLES))('%s: menu title, and it accepts audio files AND folders', async (bundle, want) => {
+    const plist = await read(bundle, 'Info.plist');
+    expect(title(plist)).toBe(want.title);
+    expect(plist).toContain('<string>public.audio</string>');
+    expect(plist).toContain('<string>public.folder</string>');
+  });
+
+  it('every title reads "Sonus - ..." so the three sort together in the Services menu', async () => {
+    for (const bundle of Object.keys(BUNDLES)) expect(title(await read(bundle, 'Info.plist'))).toMatch(/^Sonus - /);
+  });
+
+  it.each(Object.entries(BUNDLES))('%s: its script writes the right action flag (Play writes none, and clears any leftover)', async (bundle, want) => {
+    const wflow = await read(bundle, 'document.wflow');
+    expect(wflow).toContain('open -a "Sonus" "$@"');
+    if (want.flag) {
+      expect(wflow).toContain(`printf '${want.flag}'`);
+    } else {
+      expect(wflow).not.toContain('printf');
+      expect(wflow).toContain('rm -f "$HOME/Library/Application Support/Sonus/service-action.flag"');
+    }
+  });
+
+  it('every bundle has its own identifier', async () => {
+    const ids = await Promise.all(Object.keys(BUNDLES).map(async b => (await read(b, 'Info.plist')).match(/<key>CFBundleIdentifier<\/key>\s*<string>([^<]*)<\/string>/)?.[1]));
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('the Services version was bumped so existing installs get the new titles', () => {
+    expect(SERVICES_VERSION).toBeGreaterThanOrEqual(3);
+  });
+});

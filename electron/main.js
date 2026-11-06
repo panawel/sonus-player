@@ -8,7 +8,8 @@ import NodeID3 from 'node-id3';
 import windowStateKeeper from 'electron-window-state';
 import { normalizePicture, pictureToDataUrl } from './artwork.mjs';
 import { createIndexStore, diffPaths } from './indexStore.mjs';
-import { sortByFileName } from './launchFiles.mjs';
+import { sortByFileName, expandOpenedPaths } from './launchFiles.mjs';
+import { execFile } from 'child_process';
 import { installFinderServices } from './finderServices.mjs';
 import { expandToFiles } from './folderScan.mjs';
 import { createPointerTracker } from './pointerTracker.mjs';
@@ -188,9 +189,15 @@ function flushOpenFiles() {
   if (!mainWindow || !rendererReady || pendingOpenFilePaths.length === 0) return;
   if (!libraryLoadServed) return; // library:load gets first claim - see above
   openFileFlushCount++;
-  const paths = sortByFileName(pendingOpenFilePaths);
+  const batch = sortByFileName(pendingOpenFilePaths);
   pendingOpenFilePaths = [];
-  Promise.all([parseFilePaths(paths), getBatchAction()]).then(([tracks, action]) => {
+  // A Finder Service can hand us folders (right-click a folder > Sonus - ...):
+  // they become the songs inside, in order, before anything is parsed.
+  (async () => {
+    const paths = await expandOpenedPaths(batch);
+    const [tracks, action] = await Promise.all([parseFilePaths(paths), getBatchAction()]);
+    return { paths, tracks, action };
+  })().then(({ paths, tracks, action }) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     revealWindow();
     if (action) {
@@ -599,11 +606,16 @@ function buildAppMenu() {
 // and updating one whose shipped contents changed - lives in finderServices.mjs.
 async function ensureFinderServicesInstalled() {
   if (!app.isPackaged) return;
-  await installFinderServices({
+  const installed = await installFinderServices({
     srcDir: path.join(process.resourcesPath, 'services'),
     destDir: path.join(app.getPath('home'), 'Library', 'Services'),
     markerPath: path.join(app.getPath('userData'), 'services-installed.json'),
   });
+  // macOS builds its Services menu from a cache and does not always notice a
+  // bundle that was added or renamed under ~/Library/Services until the next
+  // login. Asking it to rescan is what makes new titles appear without that.
+  // Best effort: the menu catches up eventually either way.
+  if (installed.length > 0) execFile('/System/Library/CoreServices/pbs', ['-update'], () => {});
 }
 
 app.whenReady().then(async () => {
@@ -956,7 +968,8 @@ async function resolveInitialLibrary() {
 
   const openedPaths = await takeFileOpenLaunch();
   if (openedPaths) {
-    const opened = await parseFilePaths(openedPaths);
+    const expandedPaths = await expandOpenedPaths(openedPaths);
+    const opened = await parseFilePaths(expandedPaths);
     if (opened.length > 0) {
       // autoPlay distinguishes this from a restored session, which deliberately
       // comes back paused at its saved position.
@@ -964,7 +977,7 @@ async function resolveInitialLibrary() {
     }
     // Every opened file was unreadable. Fall through to the saved session:
     // replacing a working library with nothing is never the right answer.
-    failedOpenCount = openedPaths.length;
+    failedOpenCount = expandedPaths.length;
   }
 
   try {

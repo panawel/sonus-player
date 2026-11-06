@@ -123,6 +123,14 @@ export const LIBRARY_GENRE_COL_BREAKPOINT = 1000;
 // second hardcoded 560 that could silently drift from App.jsx's own.
 export const NARROW_LAYOUT_BREAKPOINT = 560;
 
+// The title strip (traffic lights, back arrow, nav pill, right pill) floats over the
+// TOP of the glass card, which runs to the window's top edge. The card reserves this
+// much padding so page content starts below it; a detail page drops that padding and
+// lets its hero photo run behind the strip (HomeDetailView.jsx), and Now Playing's glass
+// covers it but keeps its interactive content below. Mirrors .chill-drag-strip and
+// .add-dialog-drag-strip in index.css.
+export const TITLE_STRIP_HEIGHT = 42;
+
 // Window height at or below which the whole shell is replaced by the mini
 // player (MiniPlayer.jsx). The window's minHeight used to be 600, so no
 // existing layout was ever designed for anything shorter than that; ~420 is

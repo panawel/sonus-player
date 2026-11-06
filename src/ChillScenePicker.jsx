@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import cx from 'classnames';
+import { preloadChillScene } from './chillPreload.js';
 
 // The Chill-mode scene picker: a small popup of thumbnails under the title strip's
 // scene button (App.jsx). It closes on a click outside it (the button itself is
@@ -8,6 +9,11 @@ import cx from 'classnames';
 export default function ChillScenePicker({ scenes, activeId, onSelect, onClose }) {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+
+  // Opening the picker is intent: start getting every scene's pictures decoded now, so
+  // the one you choose is (nearly) ready by the time you click. Hovering or focusing a
+  // thumbnail asks again, which is free if it is already done.
+  useEffect(() => { scenes.forEach((s) => { preloadChillScene(s); }); }, [scenes]);
 
   useEffect(() => {
     const onPointerDown = (e) => {
@@ -38,6 +44,8 @@ export default function ChillScenePicker({ scenes, activeId, onSelect, onClose }
           aria-selected={s.id === activeId}
           data-scene-id={s.id}
           onClick={() => onSelect(s.id)}
+          onMouseEnter={() => preloadChillScene(s)}
+          onFocus={() => preloadChillScene(s)}
         >
           <img src={s.thumb} alt="" draggable={false} />
           <span>{s.label}</span>

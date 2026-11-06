@@ -22,10 +22,15 @@ const SS = 2;
 // hammock scene. The engine's per-frame values ({ chars, env }) come in through `apiRef`
 // (ChillRoom wires it to the engine's onFrame), and it redraws only when something changed.
 const PAGE = { x: 96, y: 50, w: 288, h: 248, padX: 20, padTop: 18, line: 11, maxLines: 20 };
-// the lyrics' type: large enough to read on a 275px-wide screen (it is still small in the window)
-const LYRIC_FONT = '600 12px -apple-system, "Helvetica Neue", Arial, sans-serif';
-const LYRIC_LINE = 15;
-const LYRIC_ROWS = 13;
+// The lyrics' page and type. The screen is only ~275px wide in the photo, so 12px type on a 288px page
+// (the first version) was a few pixels tall in an ordinary window. The type is ~1.6x that now, and the
+// page fills the document area (edge to edge but for a margin) so a line still holds about as many
+// characters as before; fewer rows fit instead. The generic (no-lyrics) page keeps PAGE as it was.
+const LYRIC_PAGE = { x: 24, y: 46, w: 432, h: 254, padX: 16, padTop: 16 };
+const LYRIC_FONT = '600 19px -apple-system, "Helvetica Neue", Arial, sans-serif';
+const LYRIC_LINE = 23;
+const LYRIC_ROWS = 10;
+const LYRIC_FONT_PX = 19;      // also reported as data-lyric-font, for the smoke suite
 const TEXT_W = PAGE.w - 2 * PAGE.padX;
 const PX_PER_CHAR = 4.6;
 const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
@@ -114,11 +119,11 @@ export default function ChillLaptopScreen({ apiRef }) {
       ctx.fillStyle = '#d3d8dc'; ctx.fillRect(0, 14, W, 26);
       ctx.fillStyle = '#8a9096'; for (let i = 0; i < 14; i += 1) ctx.fillRect(14 + i * 20, 22, 11, 9);
       ctx.fillStyle = '#a9b2ba'; ctx.fillRect(0, 40, W, H - 40);
-      ctx.fillStyle = '#e9ecee'; ctx.fillRect(PAGE.x, PAGE.y, PAGE.w, PAGE.h);
+      ctx.fillStyle = '#e9ecee'; ctx.fillRect(LYRIC_PAGE.x, LYRIC_PAGE.y, LYRIC_PAGE.w, LYRIC_PAGE.h);
       ctx.save();
-      ctx.beginPath(); ctx.rect(PAGE.x, PAGE.y, PAGE.w, PAGE.h); ctx.clip();
+      ctx.beginPath(); ctx.rect(LYRIC_PAGE.x, LYRIC_PAGE.y, LYRIC_PAGE.w, LYRIC_PAGE.h); ctx.clip();
       ctx.font = LYRIC_FONT; ctx.textBaseline = 'alphabetic';
-      const textW = PAGE.w - 2 * PAGE.padX;
+      const textW = LYRIC_PAGE.w - 2 * LYRIC_PAGE.padX;
       const paras = pageParagraphs(lyric.script, lyric.lineIndex, lyric.partial);
       // each paragraph may be right-to-left on its own (a song can mix scripts)
       const rows = [];
@@ -126,15 +131,15 @@ export default function ChillLaptopScreen({ apiRef }) {
       const visible = rows.slice(Math.max(0, rows.length - LYRIC_ROWS));
       let caret = null;
       visible.forEach((r, i) => {
-        const y = PAGE.y + PAGE.padTop + 10 + i * LYRIC_LINE;
+        const y = LYRIC_PAGE.y + LYRIC_PAGE.padTop + 14 + i * LYRIC_LINE;
         ctx.direction = r.rtl ? 'rtl' : 'ltr';
         ctx.textAlign = r.rtl ? 'right' : 'left';
-        const x = r.rtl ? PAGE.x + PAGE.w - PAGE.padX : PAGE.x + PAGE.padX;
+        const x = r.rtl ? LYRIC_PAGE.x + LYRIC_PAGE.w - LYRIC_PAGE.padX : LYRIC_PAGE.x + LYRIC_PAGE.padX;
         ctx.fillStyle = '#2f343b';
         ctx.fillText(r.row, x, y);
         if (i === visible.length - 1) caret = { x: r.rtl ? x - ctx.measureText(r.row).width - 2 : x + ctx.measureText(r.row).width + 2, y };
       });
-      if (caretOn && caret) { ctx.fillStyle = '#1b1e22'; ctx.fillRect(caret.x, caret.y - 11, 1.6, 13); }
+      if (caretOn && caret) { ctx.fillStyle = '#1b1e22'; ctx.fillRect(caret.x, caret.y - 16, 2, 20); }
       ctx.restore();
       ctx.direction = 'ltr'; ctx.textAlign = 'left';
       ctx.fillStyle = 'rgba(232,235,238,0.92)'; ctx.fillRect(24, H - 30, W - 48, 24);
@@ -149,6 +154,8 @@ export default function ChillLaptopScreen({ apiRef }) {
           const ly = values.lyric;
           const caretOn = Math.floor(performance.now() / 530) % 2 === 0 || values.typing;
           canvas.dataset.lyrics = '1';
+          canvas.dataset.lyricFont = String(LYRIC_FONT_PX);
+          canvas.dataset.lyricRowsFit = String(LYRIC_ROWS);
           canvas.dataset.typing = values.typing ? '1' : '0';
           canvas.dataset.lyricLine = String(ly.lineIndex);
           canvas.dataset.lyricChars = String(ly.partial);

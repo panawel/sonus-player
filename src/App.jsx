@@ -1,5 +1,5 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, ChevronDown, MoreVertical, Plus, Search, Home, Mic2, Disc3, Minimize2, Images } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, MoreVertical, Plus, Search, Home, Mic2, Disc3, Minimize2, Images } from 'lucide-react';
 import { FastAverageColor } from 'fast-average-color';
 import { arrayMove } from '@dnd-kit/sortable';
 import TrackList from './TrackList.jsx';
@@ -7,6 +7,7 @@ import TrackListHeader from './TrackListHeader.jsx';
 import { useTrackSelection } from './useTrackSelection.js';
 import { useTrackSort } from './useTrackSort.js';
 import { useIsNarrow } from './useIsNarrow.js';
+import useAutoHideScrollbars from './useAutoHideScrollbars.js';
 import { useIsShort } from './useIsShort.js';
 import HomeView from './HomeView';
 import HomeDetailView from './HomeDetailView';
@@ -19,12 +20,17 @@ import ChillScene from './ChillScene.jsx';
 import ChillScenePicker from './ChillScenePicker.jsx';
 import useChillChrome from './useChillChrome.js';
 import { CHILL_SCENES, getChillScene, loadChillSceneId, saveChillSceneId } from './chillScenes.js';
+import Bubble from './Bubble.jsx';
+import ArtCrossfade from './ArtCrossfade.jsx';
+import ColourLayers from './ColourLayers.jsx';
+import { coverCache, coverKey } from './coverCache.js';
+import { bubbleSpring } from './bubbleMotion.js';
 import PlayerPillNarrow, { PLAYER_PILL_NARROW_TOTAL_HEIGHT, PLAYER_PILL_NARROW_BOTTOM_MARGIN } from './PlayerPillNarrow.jsx';
 import cx from 'classnames';
 import { splitArtists, isRTL } from './audioUtils.js';
 import { __setMixCacheForTest } from './useMix.js';
 import {
-  LIBRARY_EXTRA_COLUMNS, trackMatchesQuery, ULTRA_COMPACT_PANEL_BREAKPOINT, NARROW_LAYOUT_BREAKPOINT, MINI_LAYOUT_HEIGHT_BREAKPOINT,
+  LIBRARY_EXTRA_COLUMNS, trackMatchesQuery, ULTRA_COMPACT_PANEL_BREAKPOINT, NARROW_LAYOUT_BREAKPOINT, MINI_LAYOUT_HEIGHT_BREAKPOINT, TITLE_STRIP_HEIGHT,
   LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT, extraColumnFitCount,
 } from './trackUtils.js';
 import './index.css';
@@ -51,6 +57,12 @@ const PLAYER_PILL_CLEARANCE = PLAYER_PILL_TOTAL_HEIGHT + PLAYER_PILL_BOTTOM_MARG
 // and narrow Now Playing's own Lyrics tab, both of which float PlayerPillNarrow
 // above their scrollable content now instead of docking a mini-player bar in
 // normal layout flow.
+// The cover glow / coloured shadow crossfade: a little longer than the cover's own crossfade.
+const GLOW_FADE_MS = 600;
+// How long a skip keeps the previous cover up while the new sharp one loads, before the thumbnail
+// stands in.
+const COVER_WAIT_MS = 250;
+
 const NARROW_PILL_CLEARANCE = PLAYER_PILL_NARROW_TOTAL_HEIGHT + PLAYER_PILL_NARROW_BOTTOM_MARGIN + 16;
 
 // Library's extra columns (Album/Year/Genre) drop off one at a time, right to
@@ -87,12 +99,12 @@ export default function App() {
   const [repeatMode, setRepeatMode] = useState('off'); // 'off', 'all', 'one'
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [bgColor, setBgColor] = useState('transparent');
   const [artworkRgb, setArtworkRgb] = useState(null);
-  // Full-resolution artwork for the Now Playing overlay, loaded on demand via
-  // fs:readArtwork (library objects only carry a small thumbnail URL). The
-  // thumbnail is shown upscaled until this resolves, so there's no blank flash.
-  const [npArtwork, setNpArtwork] = useState(null);
+  // Now Playing's cover, { key, src, sharp }: the file's own full-size cover (fs:readArtwork,
+  // decoded ahead by coverCache.js) once it is ready, the library's 300px thumbnail only as a
+  // stand-in (see the cover effect below).
+  const [npCover, setNpCover] = useState(null);
+  const npWasOpenRef = useRef(false);
   // 50%-crossing play counter guard — one count per listen-through. Resets when
   // playback returns below 25% (track restart / repeat-one loop), so replays
   // count again but scrubbing around the middle never double-counts.
@@ -176,6 +188,7 @@ export default function App() {
   const [playerSubtitleDuration, setPlayerSubtitleDuration] = useState('8s');
   const isUltraCompactPanel = useIsNarrow(ULTRA_COMPACT_PANEL_BREAKPOINT);
   const isNarrowLayout = useIsNarrow(NARROW_LAYOUT_BREAKPOINT);
+  useAutoHideScrollbars(isNarrowLayout);
   // Window short enough that the mini player replaces the whole shell (see
   // MiniPlayer.jsx). Independent of isNarrowLayout: a 420x300 window is both,
   // and mini wins everywhere below.
@@ -331,6 +344,8 @@ export default function App() {
   }, [playTrack, playAllTracks, homeDetailItem]);
 
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
+  // The spring every title-strip press/toggle/bubble uses (see bubbleMotion.js) as a CSS variable.
+  React.useEffect(() => { document.documentElement.style.setProperty('--spring-ease', bubbleSpring().easing); }, []);
 
   const audioRef = useRef(null);
   // "Play Next" tracks the user explicitly queued - drained by playNext() ahead of its
@@ -382,12 +397,10 @@ export default function App() {
         .then(color => {
            if (!active) return;
            const [r, g, b] = color.value;
-           setBgColor(`rgba(${r}, ${g}, ${b}, 0.5)`);
            setArtworkRgb({ r, g, b });
         })
         .catch(e => console.log(e));
     } else {
-      setBgColor('transparent');
       setArtworkRgb(null);
     }
 
@@ -672,18 +685,52 @@ export default function App() {
     return () => { unsubUpdated?.(); unsubProgress?.(); };
   }, [removeTracks, showToast]);
 
-  // Now Playing full-res artwork: reset to the thumbnail placeholder on every
-  // track change, then upgrade once fs:readArtwork resolves. Only fetched while
-  // the overlay is actually open.
+  // Now Playing's cover. A skip while Now Playing is showing keeps the PREVIOUS cover up until the
+  // new song's sharp cover is loaded and decoded (usually a few tens of ms; instant when it was
+  // prefetched), so the soft 300px thumbnail never flashes up first; only if that takes longer than
+  // COVER_WAIT_MS does the thumbnail stand in, and the sharp cover then fades in over it.
+  // Opening Now Playing shows the thumbnail at once (under the open fade) unless the sharp cover is
+  // already cached. Keyed by path + thumbnail URL, so a changed cover (Tag Editor) is re-read.
   React.useEffect(() => {
-    setNpArtwork(null);
-    if (view !== 'now_playing' || !currentTrack?.thumb || !window.electronAPI?.readArtwork) return;
+    const open = view === 'now_playing';
+    const wasOpen = npWasOpenRef.current;
+    npWasOpenRef.current = open;
+    const path = currentTrack?.filePath ?? null;
+    const thumb = currentTrack?.thumb ?? null;
+    if (!path) { setNpCover(null); return undefined; }
+    const key = coverKey(path, thumb);
+    const cached = coverCache.peek(key);
+    if (cached !== undefined) { setNpCover({ key, src: cached || thumb, sharp: !!cached }); return undefined; }
+    if (!open || !thumb || !window.electronAPI?.readArtwork) {
+      setNpCover((c) => (c && c.key === key ? c : { key, src: thumb, sharp: false }));
+      return undefined;
+    }
     let active = true;
-    window.electronAPI.readArtwork(currentTrack.filePath).then(url => {
-      if (active && url) setNpArtwork(url);
+    const standIn = () => { if (active) setNpCover((c) => (c && c.key === key ? c : { key, src: thumb, sharp: false })); };
+    const timer = wasOpen ? setTimeout(standIn, COVER_WAIT_MS) : null;
+    if (!wasOpen) standIn();
+    coverCache.get(key).then((url) => {
+      if (!active) return;
+      clearTimeout(timer);
+      setNpCover({ key, src: url || thumb, sharp: !!url });
     });
-    return () => { active = false; };
+    return () => { active = false; clearTimeout(timer); };
   }, [view, currentTrack?.filePath, currentTrack?.thumb]);
+
+  // Prefetch the covers a skip is likely to land on (the queued Play Next song, the next and the
+  // previous ones in order; shuffle's pick is random, so it can't be predicted), once the current
+  // song's own cover has had its turn.
+  React.useEffect(() => {
+    if (view !== 'now_playing' || !currentTrack) return undefined;
+    const t = setTimeout(() => {
+      const list = sortedLibrary;
+      const i = list.findIndex((tr) => tr.filePath === currentTrack.filePath);
+      const forced = forcedNextQueueRef.current[0] && list.find((tr) => tr.filePath === forcedNextQueueRef.current[0]);
+      const picks = [forced, i >= 0 ? list[(i + 1) % list.length] : null, i > 0 ? list[i - 1] : null];
+      coverCache.prefetch(picks.filter((tr) => tr && tr.thumb).map((tr) => coverKey(tr.filePath, tr.thumb)));
+    }, 150);
+    return () => clearTimeout(t);
+  }, [view, currentTrack, sortedLibrary]);
 
   // "Play Next" for tracks already in the library (right-click menu). Repositions them right
   // after the current track - purely a visual cue, since forcedNextQueueRef (below) is what
@@ -1003,7 +1050,7 @@ export default function App() {
   // different sizes (it has the full screen width to itself, not a compact
   // capsule) and the dark chrome-text color scheme instead of the pill's
   // light one. Sizes are passed in explicitly for that reason.
-  const renderTransportControls = ({ playSize, playIconSize, playMargin, controlSize, secondarySize }) => {
+  const renderTransportControls = ({ playSize, playIconSize, playMargin, controlSize, secondarySize, withMenu = false }) => {
     const ringSize = playSize + 8;
     const ringRadius = ringSize / 2 - 2;
     const ringCircumference = 2 * Math.PI * ringRadius;
@@ -1052,6 +1099,13 @@ export default function App() {
         <button className={cx('player-control-button player-toggle clickable', { 'player-toggle--on': repeatMode !== 'off' })} aria-pressed={repeatMode !== 'off'} aria-label={`Repeat: ${repeatMode}`} style={{ color: repeatMode !== 'off' ? 'var(--chrome-text)' : 'var(--chrome-text-off)' }} onClick={(e) => { e.stopPropagation(); toggleRepeat(); }}>
           {repeatMode === 'one' ? <Repeat1 size={secondarySize} /> : <Repeat size={secondarySize} />}
         </button>
+        {/* The track menu, last. Only Now Playing's own rows ask for it: the pill, the Chill bar and
+            the mini player add theirs outside this row. */}
+        {withMenu && currentTrack && (
+          <button className="player-control-button clickable" title="More" aria-label="More" data-np-menu-btn style={{ color: 'var(--chrome-text)' }} onClick={openCurrentTrackMenu}>
+            <MoreVertical size={secondarySize} />
+          </button>
+        )}
       </div>
     );
   };
@@ -1179,6 +1233,8 @@ export default function App() {
   // picker popup that changes it.
   const [chillSceneId, setChillSceneId] = useState(loadChillSceneId);
   const [chillPickerOpen, setChillPickerOpen] = useState(false);
+  // True while a scene the user picked is still loading (ChillScene.jsx reports it): the scene button spins.
+  const [chillSceneLoading, setChillSceneLoading] = useState(false);
   const chooseChillScene = (id) => { setChillSceneId(id); saveChillSceneId(id); setChillPickerOpen(false); };
   const chillSceneIdRef = useRef(chillSceneId);
   chillSceneIdRef.current = chillSceneId;
@@ -1201,6 +1257,43 @@ export default function App() {
   const npBackLabel = (previousView === 'home' && homeDetailItem)
     ? detailItemLabel(homeDetailItem)
     : ({ library: 'Library', home: 'Home' }[previousView] ?? 'Back');
+  // The title strip's back arrow (one control for what used to be Now Playing's
+  // "‹ Library" pill, the detail pages' own "‹ Home" and narrow NP's chevron).
+  // It exists only where there is somewhere to go back to, and never in Chill
+  // mode (Escape and the exit button leave that).
+  const detailOpen = view === 'home' && !!homeDetailItem;
+  const navBackLabel = isNowPlayingOpen
+    ? npBackLabel
+    : (homeDetailOrigin === 'library' ? 'Library' : homeDetailOrigin === 'now_playing' ? 'Now Playing' : 'Home');
+  const navBackVisible = (isNowPlayingOpen || detailOpen) && !chillActive && !isMiniLayout;
+  const navGoBack = () => {
+    if (isNowPlayingOpen) { collapseNowPlaying(); return; }
+    if (!detailOpen) return;
+    if (homeDetailOrigin && homeDetailOrigin !== 'home') {
+      setView(homeDetailOrigin);
+      setHomeDetailOrigin(null);
+    }
+    setHomeDetailItem(null);
+  };
+  const openCurrentTrackMenu = (e) => {
+    // Stop the click here: the open menu closes on any document click, and this
+    // very click would otherwise reach that listener and close it again at once.
+    e.stopPropagation();
+    if (trackMenu) { setTrackMenu(null); return; }
+    if (currentTrack) setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' });
+  };
+  // The right pill's two buttons. Lyrics: any page, while the song has lyrics (or the panel is
+  // already open); off Now Playing a click opens Now Playing with the lyrics showing. Chill mode:
+  // not at narrow widths, where it doesn't exist.
+  const navLyricsVisible = !!currentTrack && !!(currentTrack.lyrics || (isNowPlayingOpen && isLyricsOpen));
+  const navChillVisible = !!currentTrack && !isNarrowLayout;
+  const navRightVisible = !chillActive && !isMiniLayout && (navLyricsVisible || navChillVisible);
+  const navLyricsActive = isNowPlayingOpen && isLyricsOpen;
+  const onNavLyrics = () => {
+    if (isNowPlayingOpen) { setIsLyricsOpen((v) => !v); return; }
+    expandNowPlaying();
+    setIsLyricsOpen(true);
+  };
   const showLibrary = view === 'library' || (isNowPlayingOpen && previousView === 'library');
   showLibraryRef.current = showLibrary;
 
@@ -1458,6 +1551,8 @@ export default function App() {
       setChillScene: chooseChillScene,
       // test hook: give the playing track lyrics (or take them away) without changing track
       setCurrentLyrics: (lyrics) => setCurrentTrack(t => (t ? { ...t, lyrics } : t)),
+      // test hook: swap the playing song's fields (a different filePath is a track CHANGE)
+      patchCurrentTrack: (patch) => setCurrentTrack(t => (t ? { ...t, ...patch } : t)),
       getChillScene: () => chillSceneIdRef.current,
       // Seeds useMix's in-memory cache directly, mirroring
       // __sonusTagEditorTest.openSearchResults — lets the suite drive every
@@ -1470,12 +1565,16 @@ export default function App() {
 
   return (
     <div 
-      className="app-container"
-      style={{ background: bgColor, transition: 'background 1s ease', position: 'relative' }}
+      className={`app-container${isNarrowLayout ? ' app-container--narrow' : ''}`}
+      style={{ position: 'relative' }}
       onDragEnter={handleDragOver}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
+      {/* The window's artwork tint (over the vibrancy, under everything): crossfading fixed-colour
+          layers, not a background transition on this container (that repainted the whole window
+          every frame for a second on every song change). First child, so everything paints over it. */}
+      <ColourLayers rgb={artworkRgb} className="app-tint" layerStyle={({ r, g, b }) => ({ position: 'absolute', inset: 0, background: `rgba(${r}, ${g}, ${b}, 0.5)` })} />
       {/* Chill mode: a fixed full-window layer (like the mini player), so the
           photo fills the whole app, title strip included.
           ITS POSITION IN THE DOCUMENT MATTERS. Electron builds the window's
@@ -1488,10 +1587,10 @@ export default function App() {
           whole area as draggable and none of them could be clicked. */}
       {chillActive && (
         <ChillScene
-          key={chillSceneId}
           scene={getChillScene(chillSceneId)}
+          onLoadingChange={setChillSceneLoading}
           currentTrack={currentTrack}
-          artSrc={npArtwork || currentTrack.thumb || null}
+          artSrc={(npCover && npCover.key === coverKey(currentTrack.filePath, currentTrack.thumb) && npCover.sharp ? npCover.src : currentTrack.thumb) || null}
           isPlaying={isPlaying}
           artworkRgb={artworkRgb}
           currentTime={currentTime}
@@ -1514,88 +1613,13 @@ export default function App() {
         />
       )}
 
-      {/* Title-bar navigation: a centered Home | Library tab switch, then round
-          Search and "+" (Add music) buttons at the right edge — the traffic
-          lights own the left. Search opens a floating panel (SearchPanel, also
-          ⌘F). At narrow widths the tabs are icon-only, except the active one,
-          which also shows its name so you always know where you are. All of it
-          stays visible on every page, including narrow Now Playing's
-          full-screen takeover. */}
-      <div className={`nav-pill${chillChromeClass}`} {...chillChromeProps} style={{ position: 'fixed', top: 5, left: '50%', transform: 'translateX(-50%)', zIndex: 51, WebkitAppRegion: 'no-drag', opacity: isMiniLayout ? 0 : undefined }}>
-        <button
-          className={cx('clickable nav-pill-btn', { active: view === 'home', 'icon-only': isNarrowLayout && view !== 'home' })}
-          title="Home"
-          onClick={() => setView('home')}
-        >
-          <Home size={15} />
-          {(!isNarrowLayout || view === 'home') && <span>Home</span>}
-        </button>
-        <button
-          className={cx('clickable nav-pill-btn', { active: view === 'library', 'icon-only': isNarrowLayout && view !== 'library' })}
-          title="Library"
-          onClick={() => setView('library')}
-        >
-          <ListMusic size={15} />
-          {(!isNarrowLayout || view === 'library') && <span>Library</span>}
-        </button>
-      </div>
-      <button
-        className={`clickable nav-search-btn${searchFilterActive ? ' active' : ''}${chillChromeClass}`}
-        title={searchFilterActive ? 'This list is filtered. Click to change or clear the search (⌘F)' : 'Search (⌘F)'}
-        aria-label="Search"
-        {...chillChromeProps}
-        onClick={openSearch}
-        style={{ position: 'fixed', top: 5, right: 56, zIndex: 51, WebkitAppRegion: 'no-drag', opacity: isMiniLayout ? 0 : undefined }}
-      >
-        <Search size={15} />
-      </button>
-      <button
-        className={`clickable nav-add-btn${chillChromeClass}`}
-        title="Add music"
-        aria-label="Add music"
-        {...chillChromeProps}
-        onClick={handleAddFiles}
-        style={{ position: 'fixed', top: 5, right: 16, zIndex: 51, WebkitAppRegion: 'no-drag', opacity: isMiniLayout ? 0 : undefined }}
-      >
-        <Plus size={16} />
-      </button>
-      {/* Chill mode only: leave it. Lives in the strip with the other round
-          buttons so it fades and returns with them (Escape works too). */}
-      {chillActive && (
-        <button
-          className={`clickable nav-add-btn chill-scene-btn${chillChromeClass}`}
-          title="Change scene"
-          aria-label="Change scene"
-          {...chillChromeProps}
-          onClick={() => setChillPickerOpen(v => !v)}
-          style={{ position: 'fixed', top: 5, right: 136, zIndex: 51, WebkitAppRegion: 'no-drag' }}
-        >
-          <Images size={15} />
-        </button>
-      )}
-      {chillActive && chillPickerOpen && (
-        <ChillScenePicker scenes={CHILL_SCENES} activeId={chillSceneId} onSelect={chooseChillScene} onClose={() => setChillPickerOpen(false)} />
-      )}
-      {chillActive && (
-        <button
-          className={`clickable nav-add-btn chill-exit-btn${chillChromeClass}`}
-          title="Exit chill mode (Esc)"
-          aria-label="Exit chill mode"
-          {...chillChromeProps}
-          onClick={() => setIsChillMode(false)}
-          style={{ position: 'fixed', top: 5, right: 96, zIndex: 51, WebkitAppRegion: 'no-drag' }}
-        >
-          <Minimize2 size={15} />
-        </button>
-      )}
-
       {/* Main Content Area */}
       {/* Hidden + inert (not unmounted) while the mini player shows: opacity
           rather than visibility, because descendants such as .scrollable set
           their own explicit visibility and would punch through a hidden
           ancestor; and not display:none, which would collapse the scroll
           containers and lose Library/detail scroll positions. */}
-      <div className="glass-panel" inert={isMiniLayout} style={{ flex: 1, borderRadius: 16, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', opacity: isMiniLayout ? 0 : undefined }}>
+      <div className="glass-panel" inert={isMiniLayout} style={{ flex: 1, borderRadius: '0 0 16px 16px', borderTop: 'none', paddingTop: detailOpen ? 0 : TITLE_STRIP_HEIGHT, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', opacity: isMiniLayout ? 0 : undefined }}>
 
         {/* Column header, deliberately a SIBLING above .scrollable rather than
             sticky inside it — rows then physically cannot pass behind the
@@ -1788,14 +1812,6 @@ export default function App() {
               density={density}
               onDensityChange={setDensity}
               selectionRegistryRef={activeSelectionRef}
-              backLabel={homeDetailOrigin === 'library' ? 'Library' : homeDetailOrigin === 'now_playing' ? 'Now Playing' : 'Home'}
-              onBack={() => {
-                if (homeDetailOrigin && homeDetailOrigin !== 'home') {
-                  setView(homeDetailOrigin);
-                  setHomeDetailOrigin(null);
-                }
-                setHomeDetailItem(null);
-              }}
               savedScrollTop={homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] ?? 0}
               onScrollChange={(pos) => { homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] = pos; }}
               bottomClearance={isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE}
@@ -1838,8 +1854,7 @@ export default function App() {
             bottom: 0,
             pointerEvents: isNowPlayingOpen ? 'auto' : 'none',
             zIndex: 5,
-            WebkitAppRegion: 'no-drag',
-            clipPath: 'inset(0 0 0 0 round 16px)',
+            clipPath: 'inset(0 0 0 0 round 0 0 16px 16px)',
           }}
         >
           <div
@@ -1861,35 +1876,16 @@ export default function App() {
                 <AmbientFlares artworkRgb={artworkRgb} isPlaying={isPlaying} />
               </>
             )}
+            {/* The interactive content starts BELOW the title strip and is the only
+                no-drag part: the glass/lights above sit under the strip, which must
+                stay draggable (a no-drag block over it, as the whole overlay used to
+                be once the card reached the window's top, made the window immovable).
+                Absolute children below are positioned from this box, not the card. */}
+            <div style={{ position: 'absolute', top: TITLE_STRIP_HEIGHT, left: 0, right: 0, bottom: 0, WebkitAppRegion: 'no-drag' }}>
             {isNarrowLayout ? (
               <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', padding: '16px 20px 24px', boxSizing: 'border-box' }}>
-                {/* Top bar: back chevron, Song|Lyrics tabs, track menu */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, marginBottom: 8 }}>
-                  <button className="player-control-button clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); collapseNowPlaying(); }}>
-                    <ChevronDown size={20} />
-                  </button>
-                  {/* Only a track with lyrics actually has two tabs to switch
-                      between — for one with none, there's nothing to label. */}
-                  {currentTrack?.lyrics && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 15, fontWeight: 700 }}>
-                      <span className="clickable" style={{ color: !isLyricsOpen ? '#fff' : 'rgba(255,255,255,0.4)', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setIsLyricsOpen(false); }}>Song</span>
-                      <span style={{ color: 'rgba(255,255,255,0.25)', fontWeight: 400 }}>|</span>
-                      <span className="clickable" style={{ color: isLyricsOpen ? '#fff' : 'rgba(255,255,255,0.4)', cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setIsLyricsOpen(true); }}>Lyrics</span>
-                    </div>
-                  )}
-                  <button
-                    className="player-control-button clickable"
-                    style={{ color: 'var(--chrome-text)', visibility: currentTrack ? 'visible' : 'hidden' }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (trackMenu) { setTrackMenu(null); return; }
-                      if (currentTrack) setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' });
-                    }}
-                  >
-                    <MoreVertical size={20} />
-                  </button>
-                </div>
-
+                {/* No top bar of its own: back, Lyrics (which switches this view to the lyrics) and the track
+                    menu are all in the title strip / transport row. */}
                 {!currentTrack ? (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--chrome-text-dim)', textAlign: 'center' }}>
                     <Music size={48} style={{ opacity: 0.5, marginBottom: 16 }} />
@@ -1908,9 +1904,9 @@ export default function App() {
                      embedded transport controls already). Extra bottom padding on
                      this scroll container keeps the last lines of a long lyric from
                      sitting underneath that floating pill. */
-                  <div ref={lyricsScrollRef} style={{ flex: 1, overflowY: 'auto', padding: `8px 4px ${NARROW_PILL_CLEARANCE}px` }}>
+                  <div ref={lyricsScrollRef} className="np-narrow-lyrics" style={{ flex: 1, overflowY: 'auto', scrollbarGutter: 'stable both-edges', padding: `8px 4px ${NARROW_PILL_CLEARANCE}px` }}>
                     {currentTrack.lyrics ? (
-                      <div style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--chrome-text)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
+                      <div style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--chrome-text)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: 'center' }}>{currentTrack.lyrics}</div>
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--chrome-text-dim)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
                     )}
@@ -1943,12 +1939,10 @@ export default function App() {
                           seek/transport rows sharing this same column, and
                           overflows into the title on short windows. */}
                       <div style={{ position: 'relative', width: '100%', maxWidth: 420, maxHeight: '100%', aspectRatio: '1 / 1' }}>
-                        {artworkRgb && (
-                          <div style={{ position: 'absolute', inset: '-30%', borderRadius: '50%', filter: 'blur(60px)', background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.5)`, zIndex: 0, pointerEvents: 'none' }} />
-                        )}
+                        <ColourLayers rgb={artworkRgb} fadeMs={GLOW_FADE_MS} layerStyle={({ r, g, b }) => ({ position: 'absolute', inset: '-30%', borderRadius: '50%', filter: 'blur(60px)', background: `rgba(${r}, ${g}, ${b}, 0.5)`, zIndex: 0 })} />
                         <div style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', borderRadius: 20, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 24px 60px rgba(0,0,0,0.6)' }}>
-                          {(npArtwork || currentTrack.thumb) ? (
-                            <img src={npArtwork || currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          {npCover?.src ? (
+                            <ArtCrossfade trackKey={npCover.key} src={npCover.src} sharp={npCover.sharp} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                           ) : (
                             <div style={{ width: '100%', height: '100%', background: 'var(--glass-active)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               <Music size={64} color="var(--text-secondary)" />
@@ -2005,69 +1999,17 @@ export default function App() {
                     {/* Transport — reuses the same handlers/state as the desktop
                         player panel via renderTransportControls (see above). */}
                     <div style={{ flexShrink: 0 }}>
-                      {renderTransportControls({ playSize: 64, playIconSize: 30, playMargin: 18, controlSize: 26, secondarySize: 22 })}
+                      {renderTransportControls({ playSize: 64, playIconSize: 30, playMargin: 18, controlSize: 26, secondarySize: 22, withMenu: true })}
                     </div>
                   </div>
                 )}
               </div>
             ) : chillActive ? null : (
             <>
-            {/* Glass-pill back button — same chip language as .glass-button /
-                the genre filter chips, rather than bare text+icon floating
-                directly on the (often bright, always variable) artwork glow
-                behind it. The label is real navigational info, not
-                decoration — it names the specific screen "back" returns to
-                (Library, Home, or a Home detail page like an artist/album),
-                so it stays, just legible now. */}
-            <button
-              className="np-back-button clickable"
-              style={{ position: 'absolute', top: 16, left: 16, zIndex: 2, maxWidth: 'calc(50% - 32px)' }}
-              onClick={(e) => { e.stopPropagation(); collapseNowPlaying(); }}
-            >
-              <ChevronLeft size={18} style={{ flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{npBackLabel}</span>
-            </button>
-            {/* Lyrics toggle — same top row and centering as the narrow
-                view's Song/Lyrics tabs: top:16 matches the back button's own
-                row, centered independently of it rather than living inside
-                the artwork column, so it stays put regardless of that
-                column's width. Same lyrics glyph as the track list's row
-                indicator (Mic2), not text — white when open, dimmed when
-                closed, same as before. */}
-            {(currentTrack?.lyrics || isLyricsOpen) && (
-              <button
-                className="lyrics-open-btn clickable"
-                style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 2, color: isLyricsOpen ? '#fff' : 'rgba(255,255,255,0.4)' }}
-                onClick={(e) => { e.stopPropagation(); setIsLyricsOpen(v => !v); }}
-              >
-                <Mic2 size={20} />
-              </button>
-            )}
-            {/* Track menu (3-dot) — same top row as the back button, mirrored
-                to the right, same as narrow's own top bar. This was the
-                pill's job before the pill started hiding while Now Playing is
-                open; full-width NP needs its own now that it's self-contained
-                (see "Player pill" in docs/ARCHITECTURE.md). */}
-            {currentTrack && (
-              <button
-                className="player-control-button chill-enter-btn clickable"
-                title="Chill mode"
-                aria-label="Chill mode"
-                style={{ position: 'absolute', top: 10, right: 52, zIndex: 2, color: 'var(--chrome-text)' }}
-                onClick={(e) => { e.stopPropagation(); setIsChillMode(true); }}
-              >
-                <Disc3 size={20} />
-              </button>
-            )}
-            {currentTrack && (
-              <button
-                className="player-control-button clickable"
-                style={{ position: 'absolute', top: 10, right: 10, zIndex: 2, color: 'var(--chrome-text)' }}
-                onClick={(e) => { e.stopPropagation(); if (trackMenu) { setTrackMenu(null); return; } setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' }); }}
-              >
-                <MoreVertical size={20} />
-              </button>
-            )}
+            {/* The back button and the track menu (3-dot) / Chill buttons live in
+                the title strip now (see the nav block near the top). */}
+            {/* The lyrics toggle lives in the title strip's right pill now (Mic2, next
+                to Chill mode). */}
             {/* "Playing from" breadcrumb — its own centered row below the
                 back-button/lyrics-icon row, above the artwork, same spot as
                 the narrow Song tab's. The space for it is reserved
@@ -2145,31 +2087,27 @@ export default function App() {
                         a taste ceiling (don't let it get cartoonishly large
                         on an ultrawide monitor), not a layout requirement. */}
                     <div style={{ flex: 1, minHeight: 0, minWidth: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 32px', containerType: 'size' }}>
-                      {/* Artwork wrapper — keyed so CSS animations restart on every track change */}
+                      {/* Artwork wrapper. NOT keyed by track any more: remounting it removed the old cover at
+                          once and faded the new one in from nothing (a blank artwork area on every skip);
+                          ArtCrossfade crossfades the covers inside it instead. */}
                       <div
-                        key={currentTrack.filePath}
-                        className={cx('np-artwork', { 'np-artwork-paused': !isPlaying })}
+                        className={cx('np-artwork np-artwork--steady', { 'np-artwork-paused': !isPlaying })}
                         style={{ position: 'relative', width: 'min(100cqw, 100cqh, 820px)', aspectRatio: '1 / 1' }}
                       >
-                        {/* Ambient color glow radiating from behind the artwork */}
-                        {artworkRgb && (
-                          <div style={{
-                            position: 'absolute', inset: '-35%', borderRadius: '50%',
-                            filter: 'blur(70px)',
-                            background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.5)`,
-                            zIndex: 0, pointerEvents: 'none', transition: 'background 0.5s ease',
-                          }} />
-                        )}
+                        {/* Ambient colour glow radiating from behind the artwork, and the card's coloured
+                            shadow: both crossfade with the colour (ColourLayers) rather than repainting. */}
+                        <ColourLayers rgb={artworkRgb} fadeMs={GLOW_FADE_MS} layerStyle={({ r, g, b }) => ({ position: 'absolute', inset: '-35%', borderRadius: '50%', filter: 'blur(70px)', background: `rgba(${r}, ${g}, ${b}, 0.5)`, zIndex: 0 })} />
+                        <ColourLayers rgb={artworkRgb} fadeMs={GLOW_FADE_MS} layerStyle={({ r, g, b }) => ({ position: 'absolute', inset: 0, borderRadius: 24, boxShadow: `0 32px 80px rgba(${r}, ${g}, ${b}, 0.5)`, zIndex: 0 })} />
                         {/* Artwork card */}
                         <div style={{
                           position: 'relative', zIndex: 1, width: '100%', height: '100%',
                           borderRadius: 24, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)',
                           boxShadow: artworkRgb
-                            ? `0 32px 80px rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.5), 0 8px 32px rgba(0,0,0,0.8), 0 2px 8px rgba(0,0,0,0.5)`
+                            ? '0 8px 32px rgba(0,0,0,0.8), 0 2px 8px rgba(0,0,0,0.5)'
                             : '0 32px 80px rgba(0,0,0,0.6), 0 8px 32px rgba(0,0,0,0.8)',
                         }}>
-                          {(npArtwork || currentTrack.thumb) ? (
-                            <img src={npArtwork || currentTrack.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                          {npCover?.src ? (
+                            <ArtCrossfade trackKey={npCover.key} src={npCover.src} sharp={npCover.sharp} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                           ) : (
                             <div style={{ width: '100%', height: '100%', background: 'var(--glass-active)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               <Music style={{ width: '30%', height: '30%' }} color="var(--text-secondary)" />
@@ -2262,7 +2200,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      {renderTransportControls({ playSize: 96, playIconSize: 42, playMargin: 28, controlSize: 36, secondarySize: 28 })}
+                      {renderTransportControls({ playSize: 96, playIconSize: 42, playMargin: 28, controlSize: 36, secondarySize: 28, withMenu: true })}
                     </div>
                   </div>
                   {/* Lyrics panel — outer: transitions width */}
@@ -2297,10 +2235,133 @@ export default function App() {
             </div>
             </>
             )}
+            </div>
           </div>
         </div>
 
       </div>
+
+      {/* ORDER MATTERS (see the drag-region rule): the title strip comes AFTER the
+          glass card on purpose. A detail page puts a `drag` band across the top of
+          the card so the strip stays a window-drag area over the hero photo; Electron
+          unions a LATER drag region over earlier no-drag ones, so these no-drag pills
+          must come later than that band to carve their own area back out. Chill mode's
+          own `.chill-drag-strip` is rendered before all of this, as it always was. */}
+      {/* Title-bar navigation, two glass pills (the traffic lights own the far left):
+            - one centred pill: [back arrow, only where there is somewhere to go back to
+              (Now Playing, a detail page)] | Home | Library | Search | + Add. Search opens
+              the floating SearchPanel (also ⌘F);
+            - at the right, a small pill with Lyrics (any page, when the song has lyrics) and
+              Chill mode (wide windows). Chill mode itself shows its own Change-scene and Exit
+              buttons there instead. The track's 3-dot menu is the LAST button of each player
+              (pill, Now Playing, Chill bar, mini player), not in the strip.
+          Everything that comes and goes here is a <Bubble> (Bubble.jsx): it springs in and out
+          like a glass bubble. At narrow widths the tabs are icon-only so everything shares ~380px. */}
+      <div className={`nav-pill${chillChromeClass}`} {...chillChromeProps} style={{ position: 'fixed', top: 5, left: '50%', transform: 'translateX(-50%)', zIndex: 51, WebkitAppRegion: 'no-drag', opacity: isMiniLayout ? 0 : undefined }}>
+        <Bubble show={navBackVisible} variant="slot" width={35}>
+          <button
+            className="clickable nav-tool-btn nav-back-btn"
+            title={`Back to ${navBackLabel}`}
+            aria-label={`Back to ${navBackLabel}`}
+            onClick={navGoBack}
+          >
+            <ChevronLeft size={17} />
+          </button>
+          <span className="nav-pill-divider" aria-hidden="true" />
+        </Bubble>
+        <button
+          className={cx('clickable nav-pill-btn', { active: view === 'home', 'icon-only': isNarrowLayout })}
+          title="Home"
+          aria-label="Home"
+          onClick={() => setView('home')}
+        >
+          <Home size={15} />
+          {!isNarrowLayout && <span>Home</span>}
+        </button>
+        <button
+          className={cx('clickable nav-pill-btn', { active: view === 'library', 'icon-only': isNarrowLayout })}
+          title="Library"
+          aria-label="Library"
+          onClick={() => setView('library')}
+        >
+          <ListMusic size={15} />
+          {!isNarrowLayout && <span>Library</span>}
+        </button>
+        <span className="nav-pill-divider" aria-hidden="true" />
+        <button
+          className={`clickable nav-tool-btn nav-search-btn${searchFilterActive ? ' active' : ''}`}
+          title={searchFilterActive ? 'This list is filtered. Click to change or clear the search (⌘F)' : 'Search (⌘F)'}
+          aria-label="Search"
+          onClick={openSearch}
+        >
+          <Search size={15} />
+        </button>
+        <button
+          className="clickable nav-tool-btn nav-add-btn"
+          title="Add music"
+          aria-label="Add music"
+          onClick={handleAddFiles}
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+      <Bubble show={navRightVisible} variant="float" origin="100% 50%" className="nav-right-pill" {...chillChromeProps} style={{ position: 'fixed', top: 5, right: 16, zIndex: 51, WebkitAppRegion: 'no-drag' }}>
+        <Bubble show={navLyricsVisible} variant="slot" width={28} index={0}>
+          <button
+            className={cx('clickable nav-tool-btn nav-lyrics-btn', { active: navLyricsActive })}
+            title={navLyricsActive ? 'Hide lyrics' : 'Lyrics'}
+            aria-label="Lyrics"
+            aria-pressed={navLyricsActive}
+            onClick={onNavLyrics}
+          >
+            <Mic2 size={15} />
+          </button>
+        </Bubble>
+        <Bubble show={navChillVisible} variant="slot" width={28} index={1}>
+          <button
+            className="clickable nav-tool-btn chill-enter-btn"
+            title="Chill mode"
+            aria-label="Chill mode"
+            onClick={() => { expandNowPlaying(); setIsChillMode(true); }}
+          >
+            <Disc3 size={15} />
+          </button>
+        </Bubble>
+      </Bubble>
+      {/* Chill mode only: change scene / leave it. They take the right pill's
+          place so they fade and return with the rest of the strip (Escape
+          works too). */}
+      <Bubble
+        show={chillActive}
+        variant="float"
+        as="button"
+        className={`clickable nav-round-btn chill-scene-btn${chillChromeClass}`}
+        title="Change scene"
+        aria-label="Change scene"
+        data-loading={chillSceneLoading ? 'true' : undefined}
+        aria-busy={chillSceneLoading || undefined}
+        {...chillChromeProps}
+        onClick={() => setChillPickerOpen(v => !v)}
+        style={{ position: 'fixed', top: 5, right: 56, zIndex: 51, WebkitAppRegion: 'no-drag' }}
+      >
+        <Images size={15} />
+      </Bubble>
+      {chillActive && chillPickerOpen && (
+        <ChillScenePicker scenes={CHILL_SCENES} activeId={chillSceneId} onSelect={chooseChillScene} onClose={() => setChillPickerOpen(false)} />
+      )}
+      <Bubble
+        show={chillActive}
+        variant="float"
+        as="button"
+        className={`clickable nav-round-btn chill-exit-btn${chillChromeClass}`}
+        title="Exit chill mode (Esc)"
+        aria-label="Exit chill mode"
+        {...chillChromeProps}
+        onClick={() => setIsChillMode(false)}
+        style={{ position: 'fixed', top: 5, right: 16, zIndex: 51, WebkitAppRegion: 'no-drag' }}
+      >
+        <Minimize2 size={15} />
+      </Bubble>
 
       {/* Full-width Now Playing pill — a floating capsule, not part of the
           content card's own flex layout (position:fixed, rendered as its
@@ -2378,6 +2439,7 @@ export default function App() {
           onPlayPausePressStart={handlePlayPausePressStart}
           onPlayPausePressEnd={handlePlayPausePressEnd}
           onTap={() => { if (isNowPlayingOpen) setIsLyricsOpen(false); else expandNowPlaying(); }}
+          onOpenMenu={openCurrentTrackMenu}
           artworkRgb={artworkRgb}
         />
       )}

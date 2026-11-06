@@ -122,7 +122,7 @@ SONUS_SMOKE_SLOW=3 /Applications/Sonus.app/Contents/MacOS/Sonus --smoke
 
 Launch it once from `/Applications` before expecting the Finder integration to work:
 
-- **Finder Services** ("Add to Queue in Sonus" / "Play Next in Sonus") are installed into `~/Library/Services` at startup, and only take effect from the *next* launch. They appear under right-click → Services, and are listed in System Settings → Keyboard → Keyboard Shortcuts → Services.
+- **Finder Services** ("Sonus - Add to Queue" / "Sonus - Play Next" / "Sonus - Play", for songs and folders) are installed into `~/Library/Services` at startup, and only take effect from the *next* launch. They appear under right-click → Services, and are listed in System Settings → Keyboard → Keyboard Shortcuts → Services.
 - **File associations** are registered by macOS when it indexes the app. To make Sonus the default for a format: right-click any audio file → Get Info → "Open with:" → Sonus → Change All.
 
 ---

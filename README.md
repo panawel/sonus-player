@@ -66,7 +66,7 @@ xattr -dr com.apple.quarantine /Applications/Sonus.app
 Every release publishes **SHA-256 checksums** so you can verify your download matches what was built:
 
 ```bash
-shasum -a 256 ~/Downloads/Sonus-1.7.0-universal.dmg
+shasum -a 256 ~/Downloads/Sonus-1.8.0-universal.dmg
 ```
 
 > Prefer not to run unsigned software? [Build it yourself](#building-from-source) — it's four commands.
@@ -130,7 +130,7 @@ The window isn't locked to one desktop shape. Pick a shape from the **File** men
 | | Size | What changes |
 | --- | --- | --- |
 | **Filled Screen Mode** | fills the screen | the full desktop layout |
-| **Narrow Mode** | 440 × 760 | a phone-portrait layout: icon-only tabs, a compact player, and a single-column Now Playing with a Song/Lyrics switch |
+| **Narrow Mode** | 440 × 760 | a phone-portrait layout: icon-only tabs, a compact player, and a single-column Now Playing with a switch to the lyrics from the title bar |
 | **Mini Mode** | 380 × 200 | just the artwork, track, seek line and transport controls |
 
 Same library, same tag editor, same controls — just narrower. Make a window short and it becomes the mini player; make it tall again and you're back exactly where you were.
@@ -185,7 +185,7 @@ Cover art (paste from clipboard, drop in a file, or pull from an online lookup),
 ### Properly integrated with macOS
 
 - **Double-click any audio file** in Finder to open it in Sonus
-- **Finder Services** — right-click a selection → *Add to Queue in Sonus* or *Play Next in Sonus*
+- **Finder Services** — right-click songs **or a whole folder** → Services → *Sonus - Add to Queue*, *Sonus - Play Next* or *Sonus - Play* (a folder brings every song inside it, subfolders included, in track order)
 - **Media keys and the Now Playing widget** in Control Centre, with artwork
 - **Closing the window keeps playing**, like every native macOS player — quit with `⌘Q`
 - Remembers window position, your library, and where you were in the current track

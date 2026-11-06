@@ -9,7 +9,12 @@ import path from 'path';
 // copied into ~/Library/Services at launch. Bump SERVICES_VERSION whenever a
 // shipped bundle's contents change (e.g. its shell script), so existing installs
 // get the new one instead of silently keeping a stale copy forever.
-export const SERVICES_VERSION = 2;
+//   2: the single service-action.flag (was one flag file per action)
+//   3: menu titles "Sonus - Add to Queue" / "Sonus - Play Next", both now also
+//      accept folders, and a third bundle, "Sonus - Play". The bundle FILE names
+//      did not change (macOS shows NSMenuItem's title, not the file name), so
+//      nothing needs migrating: present + stale record -> reinstall.
+export const SERVICES_VERSION = 3;
 
 // What to do with one workflow bundle, given whether it's on disk and which
 // version we last installed there (null = we have no record).

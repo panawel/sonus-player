@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { decodeImage } from './chillPreload.js';
 
 // The shared engine that makes a scene's photo gently alive: a WebGL canvas draws the
 // photo through a scene-specific fragment shader that nudges the texture lookup — but
@@ -13,10 +14,16 @@ import { useEffect, useRef } from 'react';
 // receives update()'s return value each frame — how a DOM overlay (the phone's screen,
 // the laptop's) stays glued to what the shader moves.
 //
-// The plain <img> is ALWAYS rendered underneath, so there is no flash while the
-// textures load and, if WebGL is unavailable or its context is lost, the scene
-// is simply the still photo (data-gl="fallback"). The canvas fades in over it once
-// the first frame is drawn (data-live="true"); data-frames counts drawn frames (every 10).
+// The plain <img> is ALWAYS rendered underneath, so, if WebGL is unavailable or its
+// context is lost, the scene is simply the still photo (data-gl="fallback"). The
+// canvas takes over from it at once when the first frame is drawn (data-live="true");
+// data-frames counts drawn frames (every 10).
+//
+// `onReady` fires once the scene can be SHOWN without anything popping in: the first
+// frame is drawn, or - with no WebGL - the still photo is decoded. ChillScene keeps
+// the scene hidden until then and fades it in; that is also why there is no fade-in
+// of the canvas over the photo here any more (it would show as "photo, then the
+// animation starts").
 //
 // Cost control: it keeps moving while paused where a scene wants that, so it is kept
 // cheap — 30fps, a drawing buffer no bigger than the photo's own pixels or the window's
@@ -30,15 +37,6 @@ attribute vec2 aPos;
 varying vec2 vUv;
 void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
 function compile(gl, type, src) {
   const sh = gl.createShader(type);
   gl.shaderSource(sh, src);
@@ -47,7 +45,7 @@ function compile(gl, type, src) {
   return sh;
 }
 
-export default function ChillLivingPhoto({ photoUrl, fx, sceneW, sceneH, scale, liveState, onFrame }) {
+export default function ChillLivingPhoto({ photoUrl, fx, sceneW, sceneH, scale, liveState, onFrame, onReady }) {
   const canvasRef = useRef(null);
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
@@ -55,6 +53,8 @@ export default function ChillLivingPhoto({ photoUrl, fx, sceneW, sceneH, scale, 
   liveRef.current = liveState;
   const onFrameRef = useRef(onFrame);
   onFrameRef.current = onFrame;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -62,11 +62,16 @@ export default function ChillLivingPhoto({ photoUrl, fx, sceneW, sceneH, scale, 
     let cancelled = false;
     let rafId = 0;
     let gl = null;
-    const fail = () => { canvas.dataset.gl = 'fallback'; canvas.dataset.live = 'false'; };
+    // Without WebGL the scene IS the still photo: ready once that is decoded.
+    const fail = () => {
+      canvas.dataset.gl = 'fallback';
+      canvas.dataset.live = 'false';
+      decodeImage(photoUrl).then(() => { if (!cancelled) onReadyRef.current?.(); });
+    };
 
     (async () => {
       try {
-        const [photo, ...maskImages] = await Promise.all([loadImage(photoUrl), ...fx.masks.map((m) => loadImage(m.url))]);
+        const [photo, ...maskImages] = await Promise.all([decodeImage(photoUrl), ...fx.masks.map((m) => decodeImage(m.url))]);
         if (cancelled) return;
         gl = canvas.getContext('webgl', { alpha: false, antialias: false, powerPreference: 'low-power', preserveDrawingBuffer: false });
         if (!gl) { fail(); return; }
@@ -136,7 +141,7 @@ export default function ChillLivingPhoto({ photoUrl, fx, sceneW, sceneH, scale, 
           if (frames > 0) onFrameRef.current?.(values);
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
           frames += 1;
-          if (frames === 1) { canvas.dataset.gl = 'ok'; canvas.dataset.live = 'true'; }
+          if (frames === 1) { canvas.dataset.gl = 'ok'; canvas.dataset.live = 'true'; onReadyRef.current?.(); }
           if (frames % 10 === 0) canvas.dataset.frames = String(frames);
         };
         rafId = requestAnimationFrame(frame);

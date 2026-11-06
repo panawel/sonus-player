@@ -294,6 +294,9 @@ export default function PlayerPill({
 
           <button
             className="player-control-button clickable"
+            title="More"
+            aria-label="More"
+            data-pill-menu-btn
             style={{ color: 'var(--chrome-text)', flexShrink: 0 }}
             onClick={(e) => { e.stopPropagation(); onOpenMenu(e); }}
           >

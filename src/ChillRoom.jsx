@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import ChillLivingPhoto from './ChillLivingPhoto.jsx';
 import ChillPosters from './ChillPosters.jsx';
+import ChillNotes from './ChillNotes.jsx';
 import ChillLaptopScreen from './ChillLaptopScreen.jsx';
 import { ROOM_W, ROOM_H } from './chillRoom.js';
 
@@ -11,7 +12,7 @@ import { ROOM_W, ROOM_H } from './chillRoom.js';
 // is fine: the posters and the laptop don't move; only the laptop's CONTENT does, and it
 // follows what the typing clock says through `onFrame`, which also carries the lightning
 // flash they must share with the shader.
-export default function ChillRoom({ scene, framing, dpr, arts, isPlaying, lyrics }) {
+export default function ChillRoom({ scene, framing, dpr, arts, isPlaying, lyrics, trackKey, title, artist, onReady }) {
   const laptopApi = useRef(null);
   const overlaysRef = useRef(null);
   const lastFlash = useRef('0.00');
@@ -30,10 +31,11 @@ export default function ChillRoom({ scene, framing, dpr, arts, isPlaying, lyrics
     <>
       <ChillLivingPhoto
         photoUrl={scene.photo} fx={scene.fx} liveState={{ isPlaying, lyrics }}
-        sceneW={ROOM_W} sceneH={ROOM_H} scale={framing.k * dpr} onFrame={onFrame}
+        sceneW={ROOM_W} sceneH={ROOM_H} scale={framing.k * dpr} onFrame={onFrame} onReady={onReady}
       />
       <div className="chill-room-overlays" ref={overlaysRef} data-chill-room-overlays data-flash="0.00">
         <ChillPosters arts={arts} />
+        <ChillNotes lyrics={lyrics} trackKey={trackKey} title={title} artist={artist} />
         {arts.some((a) => a.src) && <img className="chill-glare" src={scene.glare} alt="" draggable={false} data-chill-glare />}
         <ChillLaptopScreen apiRef={laptopApi} />
       </div>

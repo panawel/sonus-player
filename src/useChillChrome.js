@@ -6,6 +6,12 @@ export const CHILL_IDLE_MS = 3500;
 // The traffic lights can't fade — macOS draws them — so they vanish when the
 // 0.6s opacity fade of everything else has finished (index.css .chill-chrome-fade).
 export const CHILL_LIGHTS_DELAY_MS = 600;
+// A pause only counts once it has lasted this long. When a track ends, the <audio>
+// reports "paused" for a moment before the next one starts playing; treating that
+// gap as a real pause showed the chrome (and re-armed the quiet clock) at every song
+// change with nobody touching anything. A gap between songs is well under this (the
+// next track normally starts within a few hundred ms); a deliberate pause is not.
+export const CHILL_PAUSE_GRACE_MS = 1500;
 
 // One idle clock for ALL of Chill mode's chrome, so it appears and disappears
 // as a unit. Returns { visible }.
@@ -13,7 +19,10 @@ export const CHILL_LIGHTS_DELAY_MS = 600;
 //   visible = !active || awake || !playing || hold
 //
 // Hidden only while playing, quiet, and nothing is holding it up (`hold`: the
-// search panel, a menu or a dialog is open). Paused always shows it.
+// search panel, a menu or a dialog is open). Paused always shows it - once the pause
+// has lasted CHILL_PAUSE_GRACE_MS, so the brief "paused" between one song ending and
+// the next starting (and the playback change back) is not mistaken for one: it
+// neither shows the chrome nor restarts the quiet clock.
 //
 // What wakes it: any mouse movement / press / key / wheel in the page, AND
 // cursor movement reported by the main process — the title strip is a window-drag
@@ -69,10 +78,19 @@ export default function useChillChrome({ active, playing, hold }) {
     };
   }, [active]);
 
-  // Restart the quiet clock when playback resumes or a hold is released.
-  useEffect(() => { if (active) wakeRef.current(); }, [active, playing, hold]);
+  // `playing`, minus the gap between two songs: false only once it has stayed false
+  // for the grace period, true again the moment playback is.
+  const [settledPlaying, setSettledPlaying] = useState(playing);
+  useEffect(() => {
+    if (playing) { setSettledPlaying(true); return undefined; }
+    const t = setTimeout(() => setSettledPlaying(false), CHILL_PAUSE_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [playing]);
 
-  const visible = !active || awake || !playing || hold;
+  // Restart the quiet clock when playback resumes (after a real pause) or a hold is released.
+  useEffect(() => { if (active) wakeRef.current(); }, [active, settledPlaying, hold]);
+
+  const visible = !active || awake || !settledPlaying || hold;
 
   useEffect(() => {
     if (!active) return undefined;

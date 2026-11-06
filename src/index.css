@@ -74,10 +74,9 @@ textarea::placeholder {
   display: flex;
   height: 100vh;
   width: 100vw;
-  /* Since we use titleBarStyle: 'hiddenInset', macOS traffic lights are overlaid on top.
-     Taller than the traffic lights strictly need, so the Library search box (fixed-position,
-     App.jsx) has room to breathe above and below it without overlapping the panel below. */
-  padding-top: 42px;
+  /* No top padding: titleBarStyle 'hiddenInset' overlays the macOS traffic lights, and the
+     glass card (App.jsx's .glass-panel) runs to the window's top edge with the title strip
+     floating on it. The card reserves the strip's 42px itself (TITLE_STRIP_HEIGHT). */
 }
 
 /* NEVER hand-write -webkit-backdrop-filter in this file.
@@ -128,19 +127,9 @@ textarea::placeholder {
    convention. Hover/press feedback only, matching .glass-button's own
    convention, just scale-based since a solid white fill has no natural
    "highlight" tint to shift to. */
-/* Same detail hero: the back button reuses Now Playing's .np-back-button
-   (built for "a back button over artwork") but with a stronger fill — the
-   base 5% white fill vanishes over a busy photo, which is what this sits on.
-   The shuffle button gets the same frosted treatment so it doesn't read as a
+/* The detail hero's Shuffle gets a frosted treatment so it doesn't read as a
    bare glyph floating on the image (the reference's own round translucent
    button); .player-control-button still supplies its shape/hover. */
-.np-back-button.np-back-button--strong {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.24);
-}
-.np-back-button.np-back-button--strong:hover {
-  background: rgba(255, 255, 255, 0.26);
-}
 .detail-shuffle-button {
   background: rgba(255, 255, 255, 0.16);
   border: 1px solid rgba(255, 255, 255, 0.24);
@@ -478,13 +467,15 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
   border-radius: 50%;
 }
 
-/* Title-bar navigation (App.jsx): a centered Home | Library tab switch plus a
-   round search button and "+" (Add music) at the right edge (search opens the
-   floating panel, SearchPanel.jsx). Same glass
-   material as .glass-button so it reads as one design language; the traffic
-   lights always occupy the left edge, so there's no collision at any width
-   (centered: ~110px at narrow, between them and the + button). */
-.nav-pill {
+/* Title-bar navigation (App.jsx), three glass pieces in one material (the same
+   as .glass-button, so it reads as one design language): a round back arrow
+   (.nav-round-btn, only where there is somewhere to go back to), one centred
+   pill (.nav-pill: Home | Library, a divider, then the Search and "+" tools),
+   and a small pill at the right (.nav-right-pill: Chill mode and the 3-dot
+   menu). The traffic lights always occupy the far left; at the narrowest
+   window the tabs go icon-only so back arrow + pill + right pill still fit. */
+.nav-pill,
+.nav-right-pill {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -493,6 +484,19 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
   border-radius: 17px;
   padding: 2px;
   backdrop-filter: blur(20px);
+}
+.nav-pill-btn,
+.nav-tool-btn,
+.nav-round-btn {
+  /* Presses squish and spring back (the same spring as the bubbles; --spring-ease is set from
+     bubbleMotion.js at startup, the bezier is only the fallback). */
+  transition: background 0.15s ease, color 0.15s ease, transform 0.55s var(--spring-ease, cubic-bezier(0.34, 1.56, 0.64, 1));
+}
+.nav-pill-btn:active,
+.nav-tool-btn:active,
+.nav-round-btn:active {
+  transform: scale(0.92);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease-out;
 }
 .nav-pill-btn {
   display: flex;
@@ -509,18 +513,14 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-  transition: background 0.15s ease, color 0.15s ease;
 }
-/* Narrow windows: icon-only tabs, except the active one also shows its name. */
+/* Narrow windows: icon-only tabs. */
 .nav-pill-btn.icon-only {
   padding: 0 9px;
 }
 .nav-pill-btn:hover {
   background: var(--glass-highlight);
   color: var(--chrome-text);
-}
-.nav-pill-btn:active {
-  transform: scale(0.94);
 }
 /* Active view — the persistent, stronger-than-hover background is the whole
    signal; text stays the same bright neutral as hover rather than switching
@@ -532,16 +532,67 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
   background: var(--glass-active);
   color: var(--chrome-text);
 }
+.nav-pill-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--glass-border);
+  flex-shrink: 0;
+}
 
-/* "+" Add music and the search icon — round glass buttons, separate controls
-   from the tabs (an action and a tool, not destinations). */
-.nav-add-btn,
-.nav-search-btn {
+/* The round tools inside the pills: Search and "+" (centre), Chill mode and the
+   3-dot (right). Same height as the tabs, so the pill stays 32px tall. */
+.nav-tool-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--chrome-text-dim);
+  cursor: pointer;
+  position: relative;
+  isolation: isolate;
+}
+.nav-tool-btn:hover {
+  background: var(--glass-highlight);
+  color: var(--chrome-text);
+}
+/* A toggled tool (Search while a filter is left on the list, Lyrics while the panel is open)
+   fills in as a circle that springs out from the centre, instead of switching on. */
+.nav-tool-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--glass-active);
+  transform: scale(0);
+  opacity: 0;
+  transition: transform 0.55s var(--spring-ease, cubic-bezier(0.34, 1.56, 0.64, 1)), opacity 0.2s ease;
+}
+.nav-tool-btn.active { color: var(--chrome-text); }
+.nav-tool-btn.active::before { transform: scale(1); opacity: 1; }
+
+/* <Bubble> (Bubble.jsx): the content of a slot inside a pill. The slot's width springs; it must
+   not clip, since the entrance overshoots and the glass rim glows outside the button. */
+.bubble-slot { display: flex; align-items: center; flex: none; overflow: visible; }
+.bubble-body { display: flex; align-items: center; flex: none; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .nav-pill-btn, .nav-tool-btn, .nav-round-btn, .nav-tool-btn::before { transition-duration: 0.01s; }
+}
+
+/* Standalone round glass buttons: the back arrow, and Chill mode's Change scene
+   and Exit. */
+.nav-round-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
   padding: 0;
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
@@ -549,20 +600,9 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
   color: var(--chrome-text-dim);
   cursor: pointer;
   backdrop-filter: blur(20px);
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
-.nav-add-btn:hover,
-.nav-search-btn:hover {
+.nav-round-btn:hover {
   background: var(--glass-highlight);
-  color: var(--chrome-text);
-}
-.nav-add-btn:active,
-.nav-search-btn:active {
-  transform: scale(0.94);
-}
-/* The search text is still filtering the list after the panel was dismissed. */
-.nav-search-btn.active {
-  background: var(--glass-active);
   color: var(--chrome-text);
 }
 
@@ -875,7 +915,7 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
   text-overflow: ellipsis;
 }
 .add-dialog-footer { display: flex; align-items: center; gap: 12px; }
-/* Title-bar band (the same 42px .app-container reserves) that moves the window
+/* Title-bar band (the same 42px the card reserves, TITLE_STRIP_HEIGHT) that moves the window
    while the dialog is open; see useWindowDrag in AddTracksDialog.jsx. */
 .add-dialog-drag-strip { position: absolute; top: 0; left: 0; right: 0; height: 42px; }
 .add-dialog-cancel {
@@ -1025,6 +1065,20 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--glass-active);
 }
+/* Narrow windows: the bar shows while scrolling and fades away after (useAutoHideScrollbars.js).
+   A custom bar otherwise stays on screen whenever the content overflows. A scrollbar pseudo-element
+   can't be transitioned itself, so the fade runs on a registered colour that the thumb reads from
+   its scroller. Only the colour changes: the bar keeps its 6px, so nothing shifts. Pointing at the
+   thumb still reveals it, so it can be grabbed. */
+@property --sb-thumb {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+.app-container--narrow ::-webkit-scrollbar-thumb { background: var(--sb-thumb); }
+.app-container--narrow ::-webkit-scrollbar-thumb:hover { background: var(--glass-active); }
+.app-container--narrow .sb-fade { transition: --sb-thumb 0.35s ease; }
+.app-container--narrow .sb-scrolling { --sb-thumb: var(--glass-highlight); }
 
 /* Custom Range Slider */
 input[type="range"] {
@@ -1189,6 +1243,13 @@ input[type="range"].top-progress-bar--narrow {
   animation-play-state: running, running;
 }
 
+/* Now Playing's own cover never remounts (ArtCrossfade crossfades inside it): no per-song appear,
+   only the breathing. (The mini player's still uses the appear, keyed by track.) */
+.np-artwork.np-artwork--steady { animation: np-artwork-breathe 12s ease-in-out infinite; }
+.np-artwork.np-artwork--steady.np-artwork-paused { animation-play-state: paused; }
+@keyframes np-art-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes np-art-out { from { opacity: 1; } to { opacity: 0; } }
+
 /* Pause only the breathe animation; keep the appear running so it completes on track change */
 .np-artwork.np-artwork-paused {
   animation-play-state: running, paused;
@@ -1289,35 +1350,6 @@ input[type="range"].top-progress-bar--narrow {
   outline: none;
   border-radius: 6px;
   transition: color 0.2s ease;
-}
-
-/* Now Playing: back button, top-left — a real glass pill (same chip
-   language as .glass-button / the genre filter chips) instead of bare
-   icon+text floating directly on the artwork glow behind it, which is
-   variable enough in color/brightness to make plain text hard to read. */
-.np-back-button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px 7px 10px;
-  border-radius: 20px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(20px);
-  color: var(--chrome-text);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  outline: none;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
-}
-.np-back-button:hover {
-  background: var(--glass-highlight);
-  color: #fff;
-}
-.np-back-button:active {
-  background: var(--glass-active);
-  transform: scale(0.97);
 }
 
 /* ─── Home screen ─────────────────────────────────────────────────── */
@@ -1583,11 +1615,21 @@ input[type="range"].top-progress-bar--narrow {
   color: var(--chrome-text);
   /* Covers the title strip, which is a window-drag area — see .chill-drag-strip. */
   -webkit-app-region: no-drag;
-  animation: chill-scene-in 0.5s ease both;
+  transition: opacity 0.5s ease;
 }
-@keyframes chill-scene-in { from { opacity: 0; } to { opacity: 1; } }
+/* Entering Chill mode: invisible until the first scene is READY (photo decoded, first
+   frame drawn), then it fades in: no brown box, no photo popping in. */
+.chill-scene--waiting { opacity: 0; pointer-events: none; }
 .chill-scene--idle { cursor: none; }
-/* The same 42px band the title strip occupies (.app-container's padding-top),
+
+/* One scene's stage while scenes are being switched (ChillScene.jsx / chillTransition.js):
+   the current scene stays opaque underneath; the requested one loads at opacity 0 and,
+   once ready, fades in on top of it (a plain crossfade: nothing ever dips to dark). */
+.chill-layer { position: absolute; inset: 0; }
+.chill-layer--loading { opacity: 0; pointer-events: none; }
+.chill-layer--in { opacity: 1; transition: opacity var(--chill-fade, 800ms) ease; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .chill-scene { transition-duration: 0.15s; } }
+/* The same 42px band the title strip occupies (TITLE_STRIP_HEIGHT in App.jsx),
    kept draggable so the window can still be moved from the top edge. The page
    never sees the pointer over it; the main process reports movement instead. */
 .chill-drag-strip {
@@ -1765,26 +1807,23 @@ input[type="range"].top-progress-bar--narrow {
 /* The strip's default glass is light and meant for the dark turntable photo; over a
    bright sky (the hammock scene) it washes out. In Chill mode the buttons get the
    same dark glass as the bar, so they read on any photo. */
-.nav-add-btn.chill-chrome-fade,
-.nav-search-btn.chill-chrome-fade {
+.nav-round-btn.chill-chrome-fade {
   background: rgba(18, 13, 10, 0.52);
   border-color: rgba(255, 255, 255, 0.18);
   color: var(--chrome-text);
 }
-.nav-add-btn.chill-chrome-fade:hover,
-.nav-search-btn.chill-chrome-fade:hover { background: rgba(48, 36, 28, 0.74); }
-.nav-search-btn.active.chill-chrome-fade { background: rgba(255, 255, 255, 0.28); }
+.nav-round-btn.chill-chrome-fade:hover { background: rgba(48, 36, 28, 0.74); }
 .nav-pill.chill-chrome-fade { background: rgba(18, 13, 10, 0.52); border-color: rgba(255, 255, 255, 0.18); }
 
 /* ── Chill mode: the hammock scene (ChillBeach.jsx) ──────────────────────── */
 /* The animated photo: a WebGL canvas over the plain <img>, which stays as the
-   fallback (and the first frame). It fades in once the first frame is drawn. */
+   fallback. It takes over the moment the first frame is drawn (no fade: its scene
+   is hidden until then, and fades in as a whole). */
 .chill-living {
   position: absolute;
   left: 0;
   top: 0;
   opacity: 0;
-  transition: opacity 0.6s ease;
   pointer-events: none;
 }
 .chill-living[data-live="true"] { opacity: 1; }
@@ -1972,6 +2011,44 @@ input[type="range"].top-progress-bar--narrow {
     linear-gradient(90deg, var(--tl, #b89a80), var(--tr, #d8b894));
   mix-blend-mode: multiply;
 }
+/* The lyrics papers (ChillNotes.jsx): a .chill-poster (so the room's blur, lightning gain, grain and
+   edge vignette apply) whose "picture" is a sheet of paper with handwriting. The paper is drawn in the
+   colour the PHOTO's own paper has in this light (--pl / --pr, measured), so it takes no further
+   dimming or colour cast (the poster filter's brightness/contrast/saturate and its multiply tint
+   are replaced below). The local box is 240px wide; sizes are in that space. The font is one macOS
+   ships (this app is macOS-only), so nothing is bundled; the stack falls back to any cursive. */
+.chill-poster.chill-note {
+  --ink: #1d1914;
+  --tl: #ffffff;
+  --tr: #ffffff;
+  background: linear-gradient(90deg, var(--pl, #6d5648), var(--pr, #6d5648));
+  filter: blur(var(--blur, 1px)) brightness(calc(0.93 * (1 + var(--flash, 0) * 0.30 * var(--fw, 1))));   /* 0.93: the grain overlay lifts the paper ~8% */
+  font-family: "Bradley Hand", "Noteworthy", "Segoe Print", "Snell Roundhand", cursive;
+  color: var(--ink);
+}
+.chill-poster.chill-note--white {
+  /* the ruled lines of the original sheet, one per body line */
+  background-image:
+    repeating-linear-gradient(to bottom, transparent 0, transparent 27px, rgba(30, 24, 20, 0.20) 27px, rgba(30, 24, 20, 0.20) 28px),
+    linear-gradient(90deg, var(--pl, #6d5648), var(--pr, #6d5648));
+  background-position: 0 46px, 0 0;
+  background-repeat: repeat, no-repeat;
+}
+.chill-poster.chill-note--yellow { --ink: #33250f; }
+.chill-note-page { position: absolute; inset: 16px 15px 14px 18px; overflow: hidden; }
+.chill-note--yellow .chill-note-page { inset: 18px 14px 12px 18px; }
+.chill-note-head {
+  font-size: 26px; line-height: 34px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-bottom: 2px solid var(--ink);
+  margin-bottom: 8px;
+}
+.chill-note--white .chill-note-line { font-size: 22px; line-height: 28px; font-weight: 600; }
+.chill-note--yellow .chill-note-line { font-size: 38px; line-height: 44px; font-weight: 700; }
+.chill-note-body { overflow: hidden; }
+.chill-note-sign { position: absolute; right: 2px; bottom: 0; font-size: 19px; line-height: 22px; font-weight: 600; text-align: right; white-space: nowrap; }
+.chill-note-line[dir="rtl"] { text-align: right; }
+
 /* The laptop's screen: a canvas mapped onto the display's corners. */
 .chill-laptop {
   position: absolute;
@@ -1981,4 +2058,22 @@ input[type="range"].top-progress-bar--narrow {
   pointer-events: none;
   /* the screen is cool and dim in a warm room; the storm lights it with everything else */
   filter: blur(0.5px) brightness(calc(0.86 * (1 + var(--flash, 0) * 0.30 * 1.03))) saturate(0.9);
+}
+
+/* The scene button while a requested scene is still loading: a small ring turns
+   around the icon (the current scene keeps playing meanwhile). */
+.chill-scene-btn { position: relative; }
+.chill-scene-btn[data-loading="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--chrome-text);
+  animation: chill-scene-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+@keyframes chill-scene-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .chill-scene-btn[data-loading="true"]::after { animation-duration: 2.4s; }
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { applyHomography, homographyFromQuad } from './chillGeometry.js';
 import {
-  ROOM_W, ROOM_H, POSTERS, ALL_POSTERS, posterLocalSize, LAPTOP_SCREEN_QUAD, LAPTOP_LOCAL_W, LAPTOP_LOCAL_H,
+  ROOM_W, ROOM_H, POSTERS, ALL_POSTERS, NOTES, posterLocalSize, LAPTOP_SCREEN_QUAD, LAPTOP_LOCAL_W, LAPTOP_LOCAL_H,
   TYPING, typingSegment, createTypingClock, breathAt, LIGHTNING, lightningAt, lightningEvent, FLASH, FLASH_GLSL, flashWeight, flashGain,
 } from './chillRoom.js';
 
@@ -282,5 +282,39 @@ describe('the flash is a change of exposure, not a white overlay', () => {
     expect(expo(1, 1, 3000)).toBeCloseTo(1, 9);
     // mid-tones get the full gain
     expect(expo(0.4, 1, 1650)).toBeCloseTo(0.4 * (1 + FLASH.gain * flashWeight(1650)), 6);
+  });
+});
+
+describe('the lyrics papers on the right-hand wall', () => {
+  const bbox = (q) => ({ x0: Math.min(...q.map(p => p[0])), x1: Math.max(...q.map(p => p[0])), y0: Math.min(...q.map(p => p[1])), y1: Math.max(...q.map(p => p[1])) });
+  const overlaps = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+
+  it('has the white sheet and the yellow sticky, both fitted to their real edges', () => {
+    expect(NOTES.map(n => n.kind).sort()).toEqual(['white', 'yellow']);
+    expect(NOTES.every(n => n.fit && n.fit.ok === true && n.fit.sides.length === 4)).toBe(true);
+  });
+  it('their corners are inside the photo, in the order [TL, TR, BR, BL]', () => {
+    for (const n of NOTES) {
+      expect(n.quad).toHaveLength(4);
+      for (const [x, y] of n.quad) { expect(x).toBeGreaterThan(0); expect(x).toBeLessThan(ROOM_W); expect(y).toBeGreaterThan(0); expect(y).toBeLessThan(ROOM_H); }
+      const [tl, tr, br, bl] = n.quad;
+      expect(tr[0]).toBeGreaterThan(tl[0]); expect(br[0]).toBeGreaterThan(bl[0]);
+      expect(bl[1]).toBeGreaterThan(tl[1]); expect(br[1]).toBeGreaterThan(tr[1]);
+    }
+  });
+  it('sit on the right wall, the sticky left of the sheet, and on no poster (the lyrics would cover its artwork)', () => {
+    const [white] = NOTES.filter(n => n.kind === 'white'), [yellow] = NOTES.filter(n => n.kind === 'yellow');
+    expect(bbox(white.quad).x0).toBeGreaterThan(ROOM_W * 0.85);
+    expect(bbox(yellow.quad).x1).toBeLessThan(bbox(white.quad).x0 + 8);
+    for (const n of NOTES) for (const p of POSTERS) expect(overlaps(bbox(n.quad), bbox(p.quad))).toBe(false);
+  });
+  it('carry the paper colour measured from the photo (dim and warm, left and right of the sheet)', () => {
+    for (const n of NOTES) {
+      for (const side of ['left', 'right']) {
+        expect(n.paper[side]).toHaveLength(3);
+        for (const v of n.paper[side]) { expect(v).toBeGreaterThan(20); expect(v).toBeLessThan(200); }
+        expect(n.paper[side][0]).toBeGreaterThanOrEqual(n.paper[side][2]);   // warm: red >= blue
+      }
+    }
   });
 });

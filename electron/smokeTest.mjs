@@ -52,7 +52,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
   // `partial: true` and a notice is printed: only a run with no filter is the
   // gate before a build or release. A mistyped name is a failure, never a silent
   // skip (a filter that matches nothing would otherwise report success).
-  const SECTIONS = ['tracklist', 'header', 'mini', 'menus', 'adddialog', 'listrows', 'tagwrite', 'folder', 'writers', 'reindex',
+  const SECTIONS = ['tracklist', 'header', 'mini', 'menus', 'adddialog', 'listrows', 'chillend', 'chillswitch', 'tagwrite', 'folder', 'writers', 'reindex',
     'fileopen', 'save-playing', 'reopen', 'tageditor', 'bench', 'frames', 'mix'];
   const only = (process.argv.find(a => a.startsWith('--only='))?.slice('--only='.length) ?? process.env.SONUS_SMOKE_ONLY ?? '')
     .split(',').map(s => s.trim()).filter(Boolean);
@@ -556,9 +556,10 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       check(barResult.barHeightRest === 26, `header is a 26px hairline (${barResult.barHeightRest})`);
       check(barResult.identityGone, 'no Library title / song count / duration anywhere on the screen');
 
-      // 16 top padding + 26 header + 6 gap = 48.
-      check(Math.abs(barResult.panelTopToFirstRow - 48) <= 3,
-        `panel top → first row is ~48px, was 135px (${barResult.panelTopToFirstRow})`);
+      // The card runs to the window top and reserves the 42px title strip itself:
+      // 42 strip + 16 top padding + 26 header + 6 gap = 90.
+      check(Math.abs(barResult.panelTopToFirstRow - 90) <= 3,
+        `panel top → first row is ~90px (42px strip + 48), was 135px (${barResult.panelTopToFirstRow})`);
 
       // The five-step Title cycle, verified by what the user actually sees.
       const cyc = barResult.cycle || [];
@@ -901,12 +902,340 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     await exec(setInput('mini'));
     await waitFor(`!!document.querySelector('.search-panel-tile')`, v => v === true);
     await exec(`document.querySelector('.search-panel-tile').click()`);
-    const toDetail = await waitFor(`({ view: window.__sonusTest.getView(), detail: !!document.querySelector('.detail-play-button'), panel: !!document.querySelector('.search-panel'), back: (document.querySelector('.np-back-button') || {}).textContent || '' })`,
+    const toDetail = await waitFor(`({ view: window.__sonusTest.getView(), detail: !!document.querySelector('.detail-play-button'), panel: !!document.querySelector('.search-panel'), back: document.querySelector('.nav-back-btn')?.getAttribute('aria-label') || '' })`,
       v => v && v.detail && v.panel === false && v.back !== '');   // wait for the settled state: the panel closes a beat after the page appears
     check(toDetail?.view === 'home' && toDetail?.panel === false && toDetail?.back.includes('Now Playing'),
       `an artist result opens its page, closes the panel, and offers a way back to Now Playing (${JSON.stringify(toDetail)})`);
     await exec(`window.__sonusTest.closeDetail(); window.__sonusTest.setView('library')`);
     await sleep(300);
+
+    // ── Title-strip navigation: one centred pill, a right pill, bubbles ──
+    // [back arrow] | Home | Library | Search | + share ONE pill (the arrow exists only where there
+    // is somewhere to go back to: Now Playing, a detail page, and replaces every in-page back
+    // button); Lyrics and Chill mode sit in a pill at the right on every page; the track's 3-dot
+    // is the LAST button of each player (pill, Now Playing), not in the strip. Everything that
+    // comes and goes in the strip is a <Bubble>: a spring, not a plain transition.
+    {
+      const strip = `(() => { const q = (s) => document.querySelector(s); const box = (s) => { const e = q(s); if (!e) return null; const b = e.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), b: Math.round(b.bottom) }; };
+        const hit = (s) => { const e = q(s); if (!e) return false; const b = e.getBoundingClientRect(); const t = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!t && (t === e || e.contains(t)); };
+        const label = (e) => e.classList.contains('bubble-slot') ? (e.querySelector('button')?.getAttribute('aria-label') ?? '?') : (e.getAttribute('aria-label') || (e.className.includes('divider') ? '|' : '?'));
+        const kids = (s) => [...document.querySelectorAll(s + ' > *')].filter(e => e.dataset.bubble !== 'out').map(label).join(',');
+        return { view: window.__sonusTest.getView(), back: q('.nav-back-btn')?.getAttribute('aria-label') ?? null, old: !!q('.np-back-button') || !!q('.nav-menu-btn') || !!q('.lyrics-open-btn'),
+          pill: kids('.nav-pill'), right: q('.nav-right-pill') && q('.nav-right-pill').dataset.bubble !== 'out' ? kids('.nav-right-pill') : null,
+          pb: box('.nav-pill'), rb: box('.nav-right-pill'),
+          hits: Object.fromEntries(['.nav-back-btn', '.nav-pill-btn[aria-label="Home"]', '.nav-pill-btn[aria-label="Library"]', '.nav-search-btn', '.nav-add-btn', '.nav-lyrics-btn', '.chill-enter-btn'].filter(s => q(s)).map(s => [s, hit(s)])) }; })()`;
+      mainWindow.setContentSize(1000, 700);
+      await sleep(400);
+      await exec(`window.__sonusTest.setView('library')`);
+      let st = await waitFor(strip, v => v && v.view === 'library' && v.right);
+      check(st.back === null && st.pill === 'Home,Library,|,Search,Add music' && st.right === 'Chill mode' && !st.old,
+        `Library: no back arrow; one pill holds Home, Library, Search and Add; only Chill mode at the right (no lyrics); no 3-dot in the strip (${JSON.stringify(st)})`);
+      check(Object.values(st.hits).every(Boolean), `every title-strip control is topmost at its own position (${JSON.stringify(st.hits)})`);
+      // One surface: the glass card runs to the window's top edge (no band, no
+      // top border) and reserves the strip's 42px, so content starts below it.
+      const cardTop = await exec(`(() => { const c = document.querySelector('.glass-panel'); const b = c.getBoundingClientRect(); const sc = document.querySelector('.scrollable').getBoundingClientRect(); return { top: b.top, borderTop: getComputedStyle(c).borderTopWidth, contentTop: Math.round(sc.top) }; })()`);
+      check(cardTop.top === 0 && cardTop.borderTop === '0px' && cardTop.contentTop >= 42, `the glass card starts at the window top, with no top border, and its content starts below the 42px strip (${JSON.stringify(cardTop)})`);
+      // The title strip must stay a window-drag area between the pills. Electron builds
+      // drag regions in DOCUMENT ORDER (the last element covering a point that sets
+      // drag/no-drag wins; none = the body's drag). A full-card layer marked no-drag
+      // (the Now Playing overlay once the card reached the window top) made the whole
+      // strip immovable, and nothing else caught it: clicks and input events bypass the
+      // OS drag layer. Sampled left, between the pills and right, on Library AND Now Playing.
+      const stripDraggable = `(() => { const all = [...document.querySelectorAll('body *')];
+        return [[250, 20], [700, 20], [250, 40], [820, 30]].map(([x, y]) => {
+          const hits = all.filter(e => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0 && x >= b.left && x < b.right && y >= b.top && y < b.bottom; })
+            .map(e => ({ e, r: getComputedStyle(e).getPropertyValue('-webkit-app-region').trim() })).filter(o => o.r === 'drag' || o.r === 'no-drag');
+          const last = hits[hits.length - 1];
+          return { x, y, draggable: !last || last.r === 'drag', by: last ? String(last.e.className || last.e.tagName).slice(0, 40) : 'body' }; }); })()`;
+      let drag = await exec(stripDraggable);
+      check(drag.every(d => d.draggable), `Library: the title strip stays draggable between the pills (${JSON.stringify(drag.filter(d => !d.draggable))})`);
+      await exec(`window.__sonusTest.setView('now_playing')`);
+      await waitFor(`window.__sonusTest.getView()`, v => v === 'now_playing');
+      await sleep(400);
+      drag = await exec(stripDraggable);
+      check(drag.every(d => d.draggable), `Now Playing: the title strip stays draggable between the pills (${JSON.stringify(drag.filter(d => !d.draggable))})`);
+      await exec(`window.__sonusTest.setView('library')`);
+      await sleep(300);
+
+      // ── the bubble motion itself ──
+      // A rAF sampler records the back arrow's scale/width/opacity and the pill's centre while it
+      // springs in. A spring OVERSHOOTS (scale and width pass their final value, then settle exactly);
+      // a plain ease cannot. The pill inflates around the arrow without moving its centre.
+      const startSampler = `(() => { window.__bm = { s: [], run: true }; const tick = () => { const sl = document.querySelector('.nav-pill .bubble-slot'); const body = sl && sl.firstElementChild;
+        if (body) { const m = /matrix\\(([^)]+)\\)/.exec(getComputedStyle(body).transform); const p = m ? m[1].split(',').map(Number) : [1, 0, 0, 1, 0, 0]; const pr = document.querySelector('.nav-pill').getBoundingClientRect();
+          window.__bm.s.push({ scale: Math.hypot(p[0], p[1]), op: +getComputedStyle(body).opacity, w: sl.getBoundingClientRect().width, cx: (pr.left + pr.right) / 2, phase: sl.dataset.bubble }); }
+        if (window.__bm.run) requestAnimationFrame(tick); }; requestAnimationFrame(tick); return true; })()`;
+      await exec(startSampler);
+      await exec(`window.__sonusTest.openDetail({ type: 'artist', key: 'Mini Artist' })`);
+      await sleep(1300);
+      let bm = await exec(`(() => { window.__bm.run = false; const s = window.__bm.s; return { n: s.length, scaleMin: Math.min(...s.map(x => x.scale)), scalePeak: Math.max(...s.map(x => x.scale)), scaleEnd: s[s.length - 1].scale, wPeak: Math.max(...s.map(x => x.w)), wEnd: s[s.length - 1].w, drift: Math.max(...s.map(x => x.cx)) - Math.min(...s.map(x => x.cx)), opEnd: s[s.length - 1].op }; })()`);
+      check(bm.n > 20 && bm.scaleMin < 0.7 && bm.scalePeak > 1.03 && bm.scalePeak < 1.15 && Math.abs(bm.scaleEnd - 1) < 0.001 && bm.wPeak > bm.wEnd + 0.5 && Math.abs(bm.wEnd - 35) < 0.5 && bm.drift < 1 && bm.opEnd === 1,
+        `the back arrow springs in: small to full, past 1 and settling exactly, the pill inflating around it without moving its centre (${JSON.stringify(bm)})`);
+      // Exit: quiet (no overshoot), then the element unmounts; while leaving it cannot be clicked.
+      await exec(startSampler);
+      await exec(`document.querySelector('.nav-back-btn').click()`);
+      await sleep(60);
+      const leaving = await exec(`(() => { const sl = document.querySelector('.nav-pill .bubble-slot'); return sl ? { phase: sl.dataset.bubble, inert: sl.inert } : null; })()`);
+      check(leaving && leaving.phase === 'out' && leaving.inert === true, `while the arrow is leaving it stays in the page but is inert (${JSON.stringify(leaving)})`);
+      check(await waitFor(`!document.querySelector('.nav-pill .bubble-slot')`, v => v === true, 2500) === true, 'then it unmounts when the exit finishes');
+      bm = await exec(`(() => { window.__bm.run = false; const s = window.__bm.s.filter(x => x.phase === 'out'); const w = s.map(x => x.w); return { peak: Math.max(...s.map(x => x.scale)), n: s.length, scaleEnd: s[s.length - 1].scale, mid: w.filter(x => x > 2 && x < 34).length, wFirst: w[0], monotone: w.every((x, i) => i === 0 || x <= w[i - 1] + 0.5), minOp: Math.min(...s.map(x => x.op)), tail: s.filter((x, i) => i % 8 === 0).map(x => [x.scale.toFixed(2), x.op.toFixed(2), x.w.toFixed(0)].join('/')).join(' ') }; })()`);
+      check(bm.n > 5 && bm.peak <= 1.001, `the exit never overshoots (peak scale ${bm.peak})`);
+      // The leaving animation must really close: the slot's width passes through values between
+      // full and zero (a bug measured its width after React had already set it to 0, so the pill
+      // snapped narrower in one cut while the arrow shrank inside empty space), and the arrow
+      // shrinks and fades while it does.
+      check(bm.wFirst > 30 && bm.mid >= 4 && bm.monotone && bm.scaleEnd < 0.6 && bm.minOp < 0.3,
+        `the leaving arrow closes gradually: the slot narrows through ${bm.mid} intermediate widths from ${bm.wFirst}px, shrinking and fading (${JSON.stringify(bm)})`);
+      // Reduced motion: no scale at all, only a quick fade.
+      await mainWindow.webContents.debugger.attach('1.3');
+      await mainWindow.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+      await exec(startSampler);
+      await exec(`window.__sonusTest.openDetail({ type: 'artist', key: 'Mini Artist' })`);
+      await sleep(700);
+      bm = await exec(`(() => { window.__bm.run = false; const s = window.__bm.s; return { n: s.length, min: Math.min(...s.map(x => x.scale)), peak: Math.max(...s.map(x => x.scale)) }; })()`);
+      await mainWindow.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+      mainWindow.webContents.debugger.detach();
+      check(bm.n > 5 && bm.min > 0.999 && bm.peak < 1.001, `with Reduce Motion on, the arrow only fades (scale stays 1: ${JSON.stringify(bm)})`);
+      await exec(`document.querySelector('.nav-back-btn').click()`);
+      await waitFor(`!document.querySelector('.nav-pill .bubble-slot')`, v => v === true, 2500);
+
+      await exec(`window.__sonusTest.openDetail({ type: 'artist', key: 'Mini Artist' })`);
+      st = await waitFor(strip, v => v && v.back && v.pill.startsWith('Back to Home,Home'));
+      check(st.back === 'Back to Home' && st.pill === 'Back to Home,Home,Library,|,Search,Add music' && !st.old && !!st.right, `a detail page has the back arrow as the pill's first slot (to Home), and its own in-page back button is gone (${JSON.stringify({ back: st.back, pill: st.pill, old: st.old })})`);
+      // The hero photo runs behind the strip: the card's top padding is dropped while a
+      // detail page is open, and the strip needs its OWN drag band (the page scroller is
+      // no-drag), with the pills carving their area back out because they come later in
+      // the document (a later no-drag beats an earlier drag).
+      const detailStrip = await exec(`(() => { const band = document.querySelector('[data-detail-drag-strip]'); const card = document.querySelector('.glass-panel');
+        const regionAt = (x, y) => { const all = [...document.querySelectorAll('body *')]; const hits = all.filter(e => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0 && x >= b.left && x < b.right && y >= b.top && y < b.bottom; })
+          .map(e => getComputedStyle(e).getPropertyValue('-webkit-app-region').trim()).filter(r => r === 'drag' || r === 'no-drag'); return hits[hits.length - 1] || 'body-drag'; };
+        const mid = (sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return regionAt(b.left + b.width / 2, b.top + b.height / 2); };
+        const hero = document.querySelector('.detail-play-button') && true;
+        return { bandTop: band ? Math.round(band.getBoundingClientRect().top) : null, bandH: band ? Math.round(band.getBoundingClientRect().height) : null, cardPad: getComputedStyle(card).paddingTop,
+          between: [regionAt(250, 20), regionAt(820, 30)], pill: mid('.nav-pill-btn[aria-label="Home"]'), search: mid('.nav-search-btn'), back: mid('.nav-back-btn'), chill: mid('.chill-enter-btn'), hero }; })()`);
+      check(detailStrip.bandTop === 0 && detailStrip.bandH === 42 && detailStrip.cardPad === '0px', `a detail page lets its hero run to the window top (card padding ${detailStrip.cardPad}, drag band at ${detailStrip.bandTop}, ${detailStrip.bandH}px)`);
+      check(detailStrip.between.every(r => r === 'drag') && [detailStrip.pill, detailStrip.search, detailStrip.back, detailStrip.chill].every(r => r === 'no-drag'),
+        `on a detail page the strip is draggable between the controls, and every control stays clickable (${JSON.stringify(detailStrip)})`);
+      const firstRow = await exec(`(() => { const h = document.querySelector('.track-list-header, [class*="track-list-header"]'); const r = document.querySelector('.track-row'); return { header: h ? Math.round(h.getBoundingClientRect().top) : null, row: r ? Math.round(r.getBoundingClientRect().top) : null }; })()`);
+      check(firstRow.header === null || firstRow.header >= 42, `the detail track list still starts below the strip (${JSON.stringify(firstRow)})`);
+      await exec(`document.querySelector('.nav-back-btn').click()`);
+      st = await waitFor(strip, v => v && v.back === null && !v.pill.includes('Back'));
+      check(st.view === 'home' && await exec(`!document.querySelector('.detail-play-button')`), 'the back arrow closes the detail page and then disappears');
+      await exec(`window.__sonusTest.setView('library')`);
+      await exec(`document.querySelector('.player-pill').click()`);
+      st = await waitFor(strip, v => v && v.view === 'now_playing' && v.back);
+      check(st.back === 'Back to Library' && !st.old && st.right === 'Chill mode', `Now Playing: back arrow to where you came from; the old in-page back, lyrics and 3-dot buttons are gone (${JSON.stringify({ back: st.back, right: st.right })})`);
+      check(await exec(`!document.querySelector('.chill-enter-btn:not(.nav-tool-btn)')`), 'Now Playing has no Chill button of its own any more');
+      await exec(`document.querySelector('.nav-back-btn').click()`);
+      st = await waitFor(strip, v => v && v.view === 'library' && v.back === null);
+      check(st.back === null, 'the back arrow returns from Now Playing to the Library');
+
+      // ── the track menu: the LAST button of each player ──
+      // A REAL pointer click (sendInputEvent), not .click(): the first version of the strip's
+      // 3-dot opened the menu and the same click, reaching the document's close-on-any-click
+      // listener, shut it again; a scripted .click() didn't show it.
+      const realClick = async (sel) => {
+        // Aim at a button that has stopped moving: a bubble that is still springing into place
+        // would be clicked where it WAS (wait for two identical rects, per the geometry rule).
+        let prev = '';
+        for (let i = 0; i < 40; i++) {
+          const cur = await exec(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return ''; const b = e.getBoundingClientRect(); return [b.left, b.top, b.width].map(n => n.toFixed(1)).join(','); })()`);
+          if (cur && cur === prev) break;
+          prev = cur; await sleep(60);
+        }
+        const pt = await exec(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+        mainWindow.webContents.sendInputEvent({ type: 'mouseMove', ...pt });
+        mainWindow.webContents.sendInputEvent({ type: 'mouseDown', ...pt, button: 'left', clickCount: 1 });
+        mainWindow.webContents.sendInputEvent({ type: 'mouseUp', ...pt, button: 'left', clickCount: 1 });
+        // Do not leave the pointer resting on the strip: a pointer on Chill's chrome holds
+        // it up (correctly), which would fail the idle-fade checks later by accident.
+        mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: 500, y: 400 });
+      };
+      const menuOpen = `(() => { const m = document.querySelector('.track-dropdown'); return m ? { items: m.querySelectorAll('.track-dropdown-item').length, inView: m.getBoundingClientRect().right <= innerWidth && m.getBoundingClientRect().left >= 0 } : null; })()`;
+      const lastInRow = await exec(`(() => { const b = document.querySelector('.player-pill [data-pill-menu-btn]'); return !!b && b === [...b.parentElement.querySelectorAll('button')].pop(); })()`);
+      check(lastInRow, 'the player pill\'s 3-dot is its last button');
+      await realClick('.player-pill [data-pill-menu-btn]');
+      let menu = await waitFor(menuOpen, v => v && v.items > 0);
+      check(menu && menu.items >= 3 && menu.inView, `the pill's 3-dot opens the track menu on the Library (${JSON.stringify(menu)})`);
+      await realClick('.player-pill [data-pill-menu-btn]');
+      check(await waitFor(`!document.querySelector('.track-dropdown')`, v => v === true) === true, 'clicking the pill\'s 3-dot again closes the menu (a toggle)');
+      await exec(`document.querySelector('.player-pill').click()`);
+      await waitFor(`window.__sonusTest.getView()`, v => v === 'now_playing');
+      await sleep(400);
+      const npLast = await exec(`(() => { const b = document.querySelector('[data-np-menu-btn]'); if (!b) return null; const row = b.parentElement; const btns = [...row.querySelectorAll('button')]; return { last: btns[btns.length - 1] === b, count: btns.length }; })()`);
+      check(npLast && npLast.last && npLast.count === 6, `Now Playing's transport row ends with the 3-dot (${JSON.stringify(npLast)})`);
+      await realClick('[data-np-menu-btn]');
+      menu = await waitFor(menuOpen, v => v && v.items > 0);
+      check(menu && menu.items >= 3 && menu.inView, `Now Playing's 3-dot opens the track menu (${JSON.stringify(menu)})`);
+      await exec(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+      await waitFor(`!document.querySelector('.track-dropdown')`, v => v === true);
+
+      // ── the lyrics button (right pill): appears with lyrics, on every page ──
+      await exec(`window.__sonusTest.setCurrentLyrics('La la la\\nla la')`);
+      st = await waitFor(strip, v => v && v.right && v.right.startsWith('Lyrics'));
+      check(st.right === 'Lyrics,Chill mode', `with lyrics the right pill gains a Lyrics button, left of Chill mode (${JSON.stringify(st.right)})`);
+      await exec(`window.__sonusTest.setView('library')`);
+      await waitFor(`window.__sonusTest.getView()`, v => v === 'library');
+      await realClick('.nav-lyrics-btn');
+      const lyr = await waitFor(`({ view: window.__sonusTest.getView(), pressed: document.querySelector('.nav-lyrics-btn')?.getAttribute('aria-pressed') })`, v => v && v.view === 'now_playing');
+      check(lyr.view === 'now_playing' && lyr.pressed === 'true', `from the Library the Lyrics button opens Now Playing with the lyrics showing (${JSON.stringify(lyr)})`);
+      await realClick('.nav-lyrics-btn');
+      check(await waitFor(`document.querySelector('.nav-lyrics-btn')?.getAttribute('aria-pressed')`, v => v === 'false') === 'false', 'on Now Playing the Lyrics button toggles the panel off again');
+      // A deliberate change (same song, lyrics taken away) springs out: the slot is seen leaving.
+      await exec(`(() => { window.__lyrSeen = false; const tick = () => { if (document.querySelector('.nav-right-pill [data-bubble="out"]')) window.__lyrSeen = true; if (!window.__lyrStop) requestAnimationFrame(tick); }; window.__lyrStop = false; requestAnimationFrame(tick); })()`);
+      await exec(`window.__sonusTest.setCurrentLyrics(null)`);
+      check(await waitFor(`!document.querySelector('.nav-lyrics-btn')`, v => v === true, 2500) === true, 'without lyrics the button bubbles away');
+      check(await exec(`window.__lyrSeen`) === true, 'taking the lyrics away springs the button out (a deliberate change animates)');
+      // A SONG change bubbles it too (with Chill mode's button beside it, on a wide window): in from
+      // the pill, springing past full size and settling; out by closing gradually. It used to be
+      // made instant on song changes (a guess at a flicker whose real cause, the colour repaints,
+      // was fixed separately), which meant it never animated at all, since songs are what change it.
+      const miniFile2 = path.join(app.getPath('userData'), 'smoke-mini-2.mp3');
+      await fs.copyFile(path.join(__dirname, '..', 'test-fixture.mp3'), miniFile2);
+      const origPath = await exec(`window.__sonusTest.getLibrary()[0].filePath`);
+      await sleep(600);
+      const lyrSampler = `(() => { window.__ls = []; window.__lsRun = true; const tick = () => { const b = document.querySelector('.nav-right-pill .nav-lyrics-btn'); const sl = b && b.closest('.bubble-slot');
+        if (sl) { const m = /matrix\\(([^)]+)\\)/.exec(getComputedStyle(sl.firstElementChild).transform); const p = m ? m[1].split(',').map(Number) : [1, 0, 0, 1, 0, 0]; window.__ls.push({ s: Math.hypot(p[0], p[1]), w: sl.getBoundingClientRect().width, ph: sl.dataset.bubble }); } else window.__ls.push(null);
+        if (window.__lsRun) requestAnimationFrame(tick); }; requestAnimationFrame(tick); return true; })()`;
+      const lyrStats = `(() => { window.__lsRun = false; const a = window.__ls.filter(Boolean); const ws = a.map(x => x.w); return { n: a.length, sMin: Math.min(...a.map(x => x.s)), sPeak: Math.max(...a.map(x => x.s)), sEnd: a.length ? a[a.length - 1].s : null, wFirst: ws[0], wEnd: ws[ws.length - 1], mid: ws.filter(w => w > 2 && w < 26).length, outFrames: a.filter(x => x.ph === 'out').length, goneAtEnd: window.__ls[window.__ls.length - 1] === null }; })()`;
+      await exec(lyrSampler);
+      await exec(`window.__sonusTest.patchCurrentTrack({ filePath: ${JSON.stringify(miniFile2)}, lyrics: 'a new song\\nwith lyrics' })`);
+      await sleep(1100);
+      let ls = await exec(lyrStats);
+      check(await exec(`!!document.querySelector('.chill-enter-btn')`) && ls.n > 20 && ls.sMin < 0.7 && ls.sPeak > 1.03 && Math.abs(ls.sEnd - 1) < 0.001 && ls.wFirst < 6 && Math.abs(ls.wEnd - 28) < 0.5 && ls.mid >= 4,
+        `a new song WITH lyrics bubbles the Lyrics button in beside Chill mode: from small, past full size, settling exactly, its slot opening gradually (${JSON.stringify(ls)})`);
+      await exec(lyrSampler);
+      await exec(`window.__sonusTest.patchCurrentTrack({ filePath: ${JSON.stringify(origPath)}, lyrics: null })`);
+      await sleep(900);
+      ls = await exec(lyrStats);
+      check(ls.outFrames >= 5 && ls.mid >= 3 && ls.goneAtEnd && ls.sPeak <= 1.001,
+        `a new song WITHOUT lyrics closes the Lyrics button gradually, without overshoot, then removes it (${JSON.stringify(ls)})`);
+      await exec(`window.__lyrStop = true`);
+      await sleep(500);
+      await exec(`window.__sonusTest.setView('library')`);
+      await waitFor(`window.__sonusTest.getView()`, v => v === 'library');
+
+      // Chill mode from another page: opens Now Playing, then Chill
+      await exec(`document.querySelector('.chill-enter-btn').click()`);
+      const chillFromLibrary = await waitFor(`({ view: window.__sonusTest.getView(), scene: !!document.querySelector('.chill-scene'), back: !!document.querySelector('.nav-back-btn'), right: !!document.querySelector('.nav-right-pill') })`, v => v && v.scene && !v.back && !v.right, 4000);
+      check(chillFromLibrary.view === 'now_playing' && !chillFromLibrary.back && !chillFromLibrary.right, `the strip's Chill button works from the Library, and Chill mode swaps the arrow and right pill for its own buttons (${JSON.stringify(chillFromLibrary)})`);
+      await exec(`window.__sonusTest.setChillMode(false)`);
+      await waitFor(`!document.querySelector('.chill-scene') && !document.querySelector('.chill-exit-btn')`, v => v === true, 4000);
+      await exec(`window.__sonusTest.setView('library')`);
+      // 380px, the narrowest window: icon-only tabs and nothing overlapping. The pill (with the
+      // arrow inside it) must clear the traffic lights (~70px) and the right pill.
+      await exec(`window.__sonusTest.setCurrentLyrics('La la la')`);
+      mainWindow.setContentSize(380, 700);
+      await sleep(500);
+      await exec(`window.__sonusTest.setView('now_playing')`);
+      st = await waitFor(strip, v => v && v.view === 'now_playing' && v.back && v.pb && v.rb);
+      st = await waitFor(strip, v => v && v.pb && v.rb && v.pb.r - v.pb.l > 150 && v.pb.r - v.pb.l < 300);
+      const tabLabels = await exec(`[...document.querySelectorAll('.nav-pill-btn')].map(b => b.textContent.trim()).join('')`);
+      check(tabLabels === '' && st.right === 'Lyrics' && st.pb.l >= 76 && st.pb.r + 4 <= st.rb.l && st.rb.r <= 380,
+        `at 380px the tabs are icon-only, there is no Chill button, and the pill (arrow inside) clears the traffic lights and the right pill (${JSON.stringify({ pb: st.pb, rb: st.rb, tabLabels })})`);
+      // Narrow Now Playing has no Song | Lyrics tabs of its own (the strip's Lyrics button switches
+      // it), and a one-button right pill is a circle with the button exactly in its middle.
+      const narrowTop = await exec(`(() => { const np = document.querySelector('[data-np-menu-btn]')?.closest('[style]'); const txt = [...document.querySelectorAll('span.clickable')].map(e => e.textContent.trim()).filter(t => t === 'Song' || t === 'Lyrics');
+        const p = document.querySelector('.nav-right-pill').getBoundingClientRect(); const b = document.querySelector('.nav-lyrics-btn').getBoundingClientRect();
+        return { tabs: txt.length, pillW: +p.width.toFixed(1), pillH: +p.height.toFixed(1), dx: +((b.left + b.width / 2) - (p.left + p.width / 2)).toFixed(2), dy: +((b.top + b.height / 2) - (p.top + p.height / 2)).toFixed(2) }; })()`);
+      check(narrowTop.tabs === 0, `narrow Now Playing has no Song | Lyrics tabs (${narrowTop.tabs})`);
+      check(Math.abs(narrowTop.pillW - narrowTop.pillH) < 0.5 && Math.abs(narrowTop.dx) <= 0.5 && Math.abs(narrowTop.dy) <= 0.5,
+        `the one-button right pill is a circle with the Lyrics button centred in it (${JSON.stringify(narrowTop)})`);
+      const narrowMenu = await exec(`!!document.querySelector('[data-np-menu-btn]')`);
+      check(narrowMenu, 'narrow Now Playing\'s transport row ends with the 3-dot too');
+      // Narrow lyrics: centred whatever the script (it used to be only right-to-left text), and the
+      // scrollbar behaves like macOS's: invisible at rest, there while scrolling, gone again after.
+      // A custom ::-webkit-scrollbar otherwise stays on screen whenever the content overflows.
+      // Measured in pixels: the bar's strip against the strip beside it, in the real rendered window.
+      await exec(`window.__sonusTest.setCurrentLyrics(Array.from({ length: 90 }, (_, i) => 'A lyric line number ' + i).join('\\n'))`);
+      await exec(`document.querySelector('.nav-lyrics-btn').click()`);
+      const lyr380 = await waitFor(`(() => { const s = document.querySelector('.np-narrow-lyrics'); if (!s) return null; const t = s.firstElementChild; return { align: getComputedStyle(t).textAlign, overflows: s.scrollHeight > s.clientHeight + 50, dir: getComputedStyle(t).direction }; })()`, v => v && v.overflows);
+      check(lyr380 && lyr380.align === 'center' && lyr380.dir === 'ltr', `narrow lyrics are centred for left-to-right text too (${JSON.stringify(lyr380)})`);
+      await sleep(1300);
+      const barContrast = async () => {
+        const r = await exec(`(() => { const b = document.querySelector('.np-narrow-lyrics').getBoundingClientRect(); return { x: Math.round(b.right) - 16, y: Math.round(b.top) + 6, width: 16, height: 60 }; })()`);
+        const img = await mainWindow.webContents.capturePage(r);
+        const { width, height } = img.getSize(); const bmp = img.toBitmap();
+        const lumAt = (x0, x1) => { let sum = 0, n = 0; for (let y = 0; y < height; y++) for (let x = Math.floor(x0 * width); x < Math.floor(x1 * width); x++) { const i = (y * width + x) * 4; sum += bmp[i] * 0.114 + bmp[i + 1] * 0.587 + bmp[i + 2] * 0.299; n++; } return sum / n; };
+        return +(Math.max(lumAt(0.70, 0.84), lumAt(0.84, 1)) - lumAt(0.20, 0.45)).toFixed(1);
+      };
+      const atRest = await barContrast();
+      await exec(`(() => { const s = document.querySelector('.np-narrow-lyrics'); s.scrollTop = 4; })()`);
+      await sleep(120);
+      await exec(`(() => { const s = document.querySelector('.np-narrow-lyrics'); s.scrollTop = 8; })()`);
+      await sleep(150);
+      const whileScrolling = await barContrast();
+      await sleep(1500);
+      const afterIdle = await barContrast();
+      check(Math.abs(atRest) < 4 && whileScrolling > atRest + 6 && Math.abs(afterIdle) < 4,
+        `the narrow scrollbar is invisible at rest (${atRest}), shows while scrolling (${whileScrolling}) and fades away after (${afterIdle})`);
+      await exec(`document.querySelector('.nav-lyrics-btn').click()`);
+      await waitFor(`!document.querySelector('.np-narrow-lyrics')`, v => v === true);
+      await exec(`window.__sonusTest.setView('library')`);
+      await waitFor(`window.__sonusTest.getView()`, v => v === 'library');
+      const narrowPill = await waitFor(`!!document.querySelector('[data-pill-menu-btn]')`, v => v === true);
+      check(narrowPill === true, 'the narrow player pill has the 3-dot as its last button');
+      await exec(`window.__sonusTest.setCurrentLyrics(null)`);
+      mainWindow.setContentSize(1000, 700);
+      await sleep(400);
+    }
+
+    // ── Skipping songs on Now Playing: sharp covers, no blank, colours that crossfade ──
+    // A recorded flicker while skipping: patchwork frames (rectangles of background in a different
+    // colour) during the 1s colour ease, and a soft 300px thumbnail shown before the sharp cover.
+    // The colour eased by repainting huge blurred layers every frame (measured: ~200 large repaints
+    // per skip); now each colour is its own static layer and they crossfade by opacity
+    // (useCrossfadeStack). And a skip keeps the previous cover up until the new song's SHARP cover
+    // is decoded (coverCache.js), so the thumbnail never shows when the cover loads in time.
+    {
+      const miniFile3 = path.join(app.getPath('userData'), 'smoke-mini-3.mp3');
+      await fs.copyFile(path.join(__dirname, '..', 'test-fixture.mp3'), miniFile3);
+      const origPath3 = await exec(`window.__sonusTest.getLibrary()[0].filePath`);
+      const origThumb = await exec(`window.__sonusTest.getLibrary()[0].thumb`);
+      await exec(`(() => { const a = document.querySelector('audio'); a.loop = true; if (a.paused) a.play().catch(() => {}); })()`);
+      await exec(`window.__sonusTest.setView('now_playing')`);
+      await waitFor(`window.__sonusTest.getView()`, v => v === 'now_playing');
+      // the sharp cover replaces the stand-in on opening
+      const opened = await waitFor(`(() => { const ims = [...document.querySelectorAll('.np-artwork img')]; const top = ims[ims.length - 1]; return top ? top.dataset.sharp : null; })()`, v => v === 'true', 3000);
+      check(opened === 'true', `opening Now Playing ends on the file's own sharp cover, not the thumbnail (${opened})`);
+      await waitFor(`!!document.querySelector('audio') && !document.querySelector('audio').paused`, v => v === true);
+      await sleep(1300);
+      const flare = `(() => { const c = document.querySelector('[data-flare-layer="current"] .ambient-flare'); return c ? getComputedStyle(c).backgroundColor : null; })()`;
+      const before = await exec(flare);
+      // count large layer repaints during the change (DevTools' own paint events)
+      const dbgP = mainWindow.webContents.debugger;
+      dbgP.attach('1.3');
+      const bigPaints = []; const onMsg = (e, m, p) => { if (m === 'LayerTree.layerPainted' && p.clip.width * p.clip.height > 1e6) bigPaints.push(p.clip.width * p.clip.height); };
+      dbgP.on('message', onMsg);
+      await dbgP.sendCommand('LayerTree.enable');
+      await sleep(300); bigPaints.length = 0;
+      await exec(`(() => { window.__art = []; window.__artRun = true; const t0 = performance.now(); const tick = () => { const ims = [...document.querySelectorAll('.np-artwork img')];
+        window.__art.push({ t: performance.now() - t0, sum: [...document.querySelectorAll('.np-artwork [data-art-layer]')].reduce((a, l) => a + parseFloat(getComputedStyle(l).opacity), 0),
+          thumbShown: ims.some(i => i.dataset.sharp === 'false' && parseFloat(getComputedStyle(i).opacity) > 0.05 && parseFloat(getComputedStyle(i.parentElement).opacity) > 0.05) });
+        if (window.__artRun) requestAnimationFrame(tick); }; requestAnimationFrame(tick); })()`);
+      const newThumb = await exec(`(() => { const cv = document.createElement('canvas'); cv.width = 40; cv.height = 40; const c = cv.getContext('2d'); c.fillStyle = '#1a7fd0'; c.fillRect(0, 0, 40, 40); return cv.toDataURL(); })()`);
+      await exec(`window.__sonusTest.patchCurrentTrack({ filePath: ${JSON.stringify(miniFile3)}, thumb: ${JSON.stringify(newThumb)} })`);
+      const early = await waitFor(flare, v => v && v !== before, 300);
+      await sleep(1300);
+      const later = await exec(flare);
+      const paints = bigPaints.length;
+      dbgP.off('message', onMsg);
+      dbgP.detach();
+      const art = await exec(`(() => { window.__artRun = false; const a = window.__art; return { frames: a.length, minSum: Math.min(...a.map(x => x.sum)), thumbFrames: a.filter(x => x.thumbShown).length }; })()`);
+      check(art.frames > 30 && art.minSum > 0.8 && art.thumbFrames === 0,
+        `a skip goes straight from one sharp cover to the next: never an empty cover area (lowest total opacity ${art.minSum?.toFixed?.(2)}), never the soft thumbnail (${art.thumbFrames} frames)`);
+      check(early && early !== before && later === early, `the lights' colour changes AT ONCE with the song (no wait), to the new cover's colour (${before} -> ${early} -> ${later})`);
+      check(paints < 30, `the colour change crossfades fixed layers instead of repainting the blurred lights every frame (${paints} large repaints in 1.3s; it was hundreds)`);
+      // skipping back to a song whose sharp cover is cached is instant (no stand-in at all)
+      await exec(`window.__art = []; window.__artRun = true; (function tick(){ const ims = [...document.querySelectorAll('.np-artwork img')]; window.__art.push({ thumbShown: ims.some(i => i.dataset.sharp === 'false' && parseFloat(getComputedStyle(i).opacity) > 0.05) }); if (window.__artRun) requestAnimationFrame(tick); })()`);
+      await exec(`window.__sonusTest.patchCurrentTrack({ filePath: ${JSON.stringify(origPath3)}, thumb: ${JSON.stringify(origThumb)} })`);
+      await sleep(600);
+      const back = await exec(`(() => { window.__artRun = false; return window.__art.filter(x => x.thumbShown).length; })()`);
+      check(back === 0, `back to a song whose cover is cached: the sharp cover, at once (${back} thumbnail frames)`);
+      await exec(`document.querySelector('audio').loop = false`);
+      await exec(`window.__sonusTest.setView('library')`);
+      await sleep(300);
+    }
 
     // ── Chill mode: Now Playing as a turntable (ChillScene.jsx) ─────────────
     // The photo fills Now Playing, the artwork is the spinning record, and the
@@ -921,9 +1250,9 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         return mainWindow.__sonusButtonsVisible;
       };
       const chrome = `(() => { const q = (s) => document.querySelector(s); const op = (s) => (q(s) ? getComputedStyle(q(s)).opacity : null);
-        return { idle: !!q('.chill-scene--idle'), bar: op('.chill-bar'), tabs: op('.nav-pill'), search: op('.nav-search-btn'), add: op('.nav-add-btn'), exit: op('.chill-exit-btn'), scene: op('.chill-scene-btn'),
+        return { idle: !!q('.chill-scene--idle'), bar: op('.chill-bar'), tabs: op('.nav-pill'), exit: op('.chill-exit-btn'), scene: op('.chill-scene-btn'),
           tabsInert: !!q('.nav-pill')?.inert, exitInert: !!q('.chill-exit-btn')?.inert }; })()`;
-      const allOpacity = (v, o) => v && [v.bar, v.tabs, v.search, v.add, v.exit, v.scene].every(x => x === o);
+      const allOpacity = (v, o) => v && [v.bar, v.tabs, v.exit, v.scene].every(x => x === o);
       mainWindow.setContentSize(1000, 700);
       await sleep(400);
       // The fixture is only 20s long and this block runs longer than that from
@@ -934,7 +1263,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       await waitFor(`window.__sonusTest.getView()`, v => v === 'now_playing');
       check(await waitFor(`!!document.querySelector('.chill-enter-btn')`, v => v === true) === true, 'full-width Now Playing offers a Chill mode button');
       await execC(`document.querySelector('.chill-enter-btn').click()`);
-      const sceneUp = await waitFor(`(() => { const s = document.querySelector('.chill-scene'); const p = document.querySelector('.chill-photo'); return !!s && !!p && p.complete && p.naturalWidth === 2752; })()`, v => v === true);
+      const sceneUp = await waitFor(`(() => { const s = document.querySelector('.chill-scene'); const p = document.querySelector('.chill-photo'); return !!s && s.dataset.chillState === 'ready' && !!p && p.complete && p.naturalWidth === 2752; })()`, v => v === true);
       check(sceneUp === true, 'Chill mode shows the turntable photo (loaded at full size)');
       const bleed = await execC(`(() => { const r = document.querySelector('.chill-scene').getBoundingClientRect(); const d = document.querySelector('.chill-drag-strip').getBoundingClientRect();
         return { l: r.left, t: r.top, w: r.width, h: r.height, iw: innerWidth, ih: innerHeight, stripTop: d.top, stripH: d.height, region: getComputedStyle(document.querySelector('.chill-drag-strip')).getPropertyValue('-webkit-app-region') }; })()`);
@@ -948,13 +1277,13 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       // re-claims their area as draggable and none of them can be clicked (this
       // shipped broken once: JS .click() in tests bypasses the OS drag layer).
       const regionOrder = await execC(`(() => { const strip = document.querySelector('.chill-drag-strip');
-        return ['.nav-pill', '.nav-search-btn', '.nav-add-btn', '.chill-exit-btn', '.chill-scene-btn'].map(sel => { const el = document.querySelector(sel);
+        return ['.nav-pill', '.chill-exit-btn', '.chill-scene-btn'].map(sel => { const el = document.querySelector(sel);
           return { sel, region: getComputedStyle(el).getPropertyValue('-webkit-app-region'), after: !!(strip.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) }; }); })()`);
       check(regionOrder.every(o => o.region === 'no-drag' && o.after),
         `every title-strip button is no-drag AND comes after the drag band in document order, so it stays clickable (${JSON.stringify(regionOrder)})`);
       // Every strip button must be the TOPMOST thing at its own position — a
       // layer over it would swallow the click just as surely as a drag region.
-      const hitTest = await execC(`(() => { const out = {}; const sels = { home: '.nav-pill-btn:nth-child(1)', library: '.nav-pill-btn:nth-child(2)', search: '.nav-search-btn', add: '.nav-add-btn', exit: '.chill-exit-btn', scene: '.chill-scene-btn', menu: '[data-chill-menu-btn]', transport: '.chill-transport button' };
+      const hitTest = await execC(`(() => { const out = {}; const sels = { home: '.nav-pill-btn[aria-label="Home"]', library: '.nav-pill-btn[aria-label="Library"]', search: '.nav-search-btn', add: '.nav-add-btn', exit: '.chill-exit-btn', scene: '.chill-scene-btn', menu: '[data-chill-menu-btn]', transport: '.chill-transport button' };
         for (const [k, s] of Object.entries(sels)) { const el = document.querySelector(s); if (!el) { out[k] = false; continue; } const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); out[k] = !!top && (top === el || el.contains(top)); }
         return out; })()`);
       check(Object.values(hitTest).every(Boolean), `every title-strip button and the transport controls are topmost at their own position (${JSON.stringify(hitTest)})`);
@@ -1075,7 +1404,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       mainWindow.webContents.send('window:pointer-moved');
       await waitFor(chrome, v => allOpacity(v, '1'));
       await execC(`document.querySelector('.chill-exit-btn').click()`);
-      const exited = await waitFor(`({ scene: !!document.querySelector('.chill-scene'), exit: !!document.querySelector('.chill-exit-btn'), tabs: getComputedStyle(document.querySelector('.nav-pill')).opacity, view: window.__sonusTest.getView() })`, v => v && v.scene === false);
+      const exited = await waitFor(`({ scene: !!document.querySelector('.chill-scene'), exit: !!document.querySelector('.chill-exit-btn'), tabs: getComputedStyle(document.querySelector('.nav-pill')).opacity, view: window.__sonusTest.getView() })`, v => v && v.scene === false && v.exit === false);
       check(exited && !exited.scene && !exited.exit && exited.view === 'now_playing' && exited.tabs === '1', `the exit button leaves Chill mode (${JSON.stringify(exited)})`);
       check(await lights(true) === true, 'leaving Chill mode keeps the traffic lights visible');
       await execC(`window.__sonusTest.setChillMode(true)`);
@@ -1086,7 +1415,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       // the preference survives a narrow excursion but only renders where it can
       mainWindow.setContentSize(500, 700);
       await waitFor(`!document.querySelector('.chill-scene')`, v => v === true);
-      check(await execC(`!document.querySelector('.chill-scene') && !document.querySelector('.chill-enter-btn')`), 'narrow windows get no Chill mode (and no button)');
+      check(await waitFor(`!document.querySelector('.chill-scene') && !document.querySelector('.chill-enter-btn')`, v => v === true, 3000) === true, 'narrow windows get no Chill mode (and no button)');
       check(await lights(true) === true, 'going narrow while the lights were hidden puts them back');
       check(await execC(`getComputedStyle(document.querySelector('.nav-pill')).opacity`) === '1', 'and the title strip is back too');
       mainWindow.setContentSize(1000, 700);
@@ -1094,7 +1423,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
 
       // Escape leaves Chill mode but not Now Playing
       await execC(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`);
-      const left = await waitFor(`({ scene: !!document.querySelector('.chill-scene'), view: window.__sonusTest.getView(), back: !!document.querySelector('.np-back-button') })`, v => v && v.scene === false);
+      const left = await waitFor(`({ scene: !!document.querySelector('.chill-scene'), view: window.__sonusTest.getView(), back: !!document.querySelector('.nav-back-btn') })`, v => v && v.scene === false);
       check(left && left.scene === false && left.view === 'now_playing' && left.back, `Escape exits Chill mode and stays on Now Playing (${JSON.stringify(left)})`);
       await execC(`(() => { const a = document.querySelector('audio'); a.loop = false; a.currentTime = 0; })()`);
       await execC(`window.__sonusTest.setView('library')`);
@@ -1317,6 +1646,36 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       await execS(`window.__sonusTest.setCurrentLyrics('smoke lyric one\\nsmoke lyric two\\n\\nsecond verse here\\nand its last line')`);
       const lyricsOn = await waitFor(lapState, v => v && v.lyrics === '1', 6000);
       check(lyricsOn && lyricsOn.lyrics === '1' && lyricsOn.rows === 4, `with lyrics the laptop types THEM, not the generic text (${JSON.stringify(lyricsOn)})`);
+      check(Number(await execS(`document.querySelector('[data-chill-laptop]').dataset.lyricFont`)) >= 18, 'the laptop lyrics are drawn in a large type (>= 18 local px; they were 12)');
+
+      // ── the same lyrics, handwritten on the two papers on the right-hand wall ──
+      const noteInfo = `(() => [...document.querySelectorAll('[data-chill-note]')].map(e => ({ kind: e.dataset.chillNote, text: e.innerText || e.textContent, matrix: e.style.transform.startsWith('matrix3d('), fw: e.style.getPropertyValue('--fw') !== '' })))()`;
+      const notesOn = await waitFor(noteInfo, v => Array.isArray(v) && v.length === 2);
+      const white = notesOn.find(n => n.kind === 'white'), yellow = notesOn.find(n => n.kind === 'yellow');
+      check(notesOn.length === 2 && !!white && !!yellow, `the white sheet and the yellow sticky both carry lyrics (${notesOn.map(n => n.kind).join(', ')})`);
+      const LYR = ['smoke lyric one', 'smoke lyric two', 'second verse here', 'and its last line'];
+      const hasLyric = (n) => !!n && LYR.some(l => n.text.includes(l));
+      check(hasLyric(white) && hasLyric(yellow), `each paper shows lines of the song (${JSON.stringify([white && white.text, yellow && yellow.text])})`);
+      check(white && white.text.includes('Mini Smoke Track') && white.text.includes('Mini Artist'), 'the white sheet is headed with the song\'s title and signed with the artist');
+      check(white && yellow && LYR.find(l => white.text.includes(l)) !== LYR.find(l => yellow.text.includes(l)), 'the two papers carry different verses');
+      check(notesOn.every(n => n.matrix && n.fw), 'both are mapped onto their paper in perspective and take the lightning like the prints');
+      // a paper is the room's colour in this light (dim, warm), not white. The photo is framed to cover the
+      // window and the papers sit at its far right: measure in a window wide enough to show them.
+      mainWindow.setContentSize(1400, 800);
+      await waitFor(`(() => { const e = document.querySelector('[data-chill-note="white"]'); if (!e) return null; const b = e.getBoundingClientRect(); return { inView: b.right < innerWidth - 4 && b.left > 0, w: innerWidth }; })()`, v => v && v.inView && v.w === 1400);
+      await sleep(600);
+      const noteRegion = await execS(`(() => { const e = document.querySelector('[data-chill-note="white"]'); const b = e.getBoundingClientRect(); return { x: b.left + b.width * 0.2, y: b.top + b.height * 0.6, w: b.width * 0.6, h: b.height * 0.28 }; })()`);
+      await execS(`window.__sonusFlashOverride = 0`); await sleep(500);
+      const noteCalm = await mainWindow.webContents.capturePage();
+      await execS(`window.__sonusFlashOverride = 1`); await sleep(500);
+      const noteFlash = await mainWindow.webContents.capturePage();
+      await execS(`delete window.__sonusFlashOverride`);
+      const nA = meanOf(noteCalm, noteRegion), nB = meanOf(noteFlash, noteRegion);
+      const nLum = (v) => 0.299 * v[0] + 0.587 * v[1] + 0.114 * v[2];
+      check(nLum(nA) > 50 && nLum(nA) < 150, `the paper is as dim as the room, not white (luminance ${nLum(nA).toFixed(0)} of 255)`);
+      check(nLum(nB) / nLum(nA) > 1.04 && nLum(nB) / nLum(nA) < 1.4, `and it brightens in the lightning by about the same as the rest of the room (x${(nLum(nB) / nLum(nA)).toFixed(2)})`);
+      mainWindow.setContentSize(1000, 700);
+      await sleep(600);
       const seq = [];
       const tEnd2 = Date.now() + 11000;
       while (Date.now() < tEnd2) { const v = await execS(lapState); if (v) seq.push(v); await sleep(90); }
@@ -1330,7 +1689,12 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       check(darkNow > 150, `real text is drawn on the page (${darkNow} dark pixels)`);
       // paused: nothing more is typed
       await execS(`document.querySelector('audio').pause()`);
-      const frozen0 = await waitFor(lapState, v => v && v.typing === '0', 4000);
+      await waitFor(lapState, v => v && v.typing === '0', 4000);
+      // The typing clock EASES to a stop (its gate has a time constant), so a character can still land a
+      // moment after "typing" reads 0 - whether it does depends on where in a line the pause fell. Let it
+      // settle, THEN measure: frozen means nothing moves from here on.
+      await sleep(1500);
+      const frozen0 = await execS(lapState);
       await sleep(3500);
       const frozen1 = await execS(lapState);
       check(frozen0 && frozen1.line === frozen0.line && frozen1.chars === frozen0.chars && frozen1.typing === '0', `pausing the music freezes the lyrics where they were (line ${frozen0?.line} char ${frozen0?.chars} -> line ${frozen1?.line} char ${frozen1?.chars})`);
@@ -1339,8 +1703,12 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       await execS(`window.__sonusTest.setCurrentLyrics('another song\\nfirst words')`);
       const restarted = await waitFor(lapState, v => v && v.lyrics === '1' && v.rows === 2 && v.line === 0 && v.cycle === 0, 4000);
       check(!!restarted, `a different track's lyrics start over from the first line (${JSON.stringify(restarted)})`);
+      const notesAgain = await waitFor(noteInfo, v => Array.isArray(v) && v.length >= 2 && v.some(n => n.text.includes('another song') || n.text.includes('first words')));
+      check(notesAgain.some(n => n.text.includes('another song') || n.text.includes('first words')), 'a different track writes its own verses on the papers');
       // no lyrics: the generic typing is back, exactly as before
       await execS(`window.__sonusTest.setCurrentLyrics(null)`);
+      const notesGone = await waitFor(noteInfo, v => Array.isArray(v) && v.length === 0);
+      check(notesGone.length === 0, 'with no lyrics the papers keep the photo\'s own writing (nothing is drawn on them)');
       const generic = await waitFor(`(() => { const c = document.querySelector('[data-chill-laptop]'); return c ? { l: c.dataset.lyrics, chars: Number(c.dataset.chars || 0), typing: c.dataset.typing } : null; })()`, v => v && v.l === '0', 4000);
       await sleep(7000);
       const generic2 = await execS(`(() => { const c = document.querySelector('[data-chill-laptop]'); return { l: c.dataset.lyrics, chars: Number(c.dataset.chars || 0) }; })()`);
@@ -1843,6 +2211,13 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     const dragFrom = async (label, pointExpr, expectMove) => {
       const pt = await execD(pointExpr);
       const before = mainWindow.getPosition();
+      // Start from the middle of the display: wherever the cursor happens to be parked (the
+      // right edge, say) it cannot move 80px further, which failed this check for a reason
+      // that had nothing to do with dragging.
+      const parkedAt = screen.getCursorScreenPoint();
+      const wa = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
+      warpCursor(wa.x + Math.round(wa.width / 2), wa.y + Math.round(wa.height / 2));
+      await sleep(150);
       const c0 = screen.getCursorScreenPoint();
       mainWindow.webContents.sendInputEvent({ type: 'mouseDown', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
       await sleep(100);
@@ -1862,7 +2237,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       if (expectMove) check(Math.abs(moved[0] - 80) <= 2 && Math.abs(moved[1] - 40) <= 2, `${label}: pressing and moving moves the window (${moved.join(', ')} vs 80, 40)`);
       else check(moved[0] === 0 && moved[1] === 0, `${label}: pressing a button and moving does not move the window (${moved.join(', ')})`);
       check(open === true, `${label}: the dialog is still open afterwards (releasing a drag is not a click)`);
-      warpCursor(c0.x, c0.y);
+      warpCursor(parkedAt.x, parkedAt.y);
       mainWindow.setPosition(before[0], before[1], false);
       await sleep(100);
     };
@@ -1998,6 +2373,168 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     for (const f of lrFiles) await fs.rm(f, { force: true });
   } catch (err) {
     failures.push(`list rows error: ${err.stack || err}`);
+  }
+
+  // ── Chill mode: a song ending must not bring the controls back ───────────
+  // The chrome is hidden after a quiet spell while PLAYING. When a track ends, the
+  // <audio> reports "paused" for a moment before the next one plays, and the hook
+  // both showed the chrome for that gap and re-armed its 3.5s timer on every playing
+  // change, so the controls reappeared for several seconds at every song change with
+  // nobody touching anything. Real files: see the focus note.
+  if (wants('chillend')) try {
+    const ceFiles = [1, 2].map(i => path.join(app.getPath('userData'), `smoke-chillend-${i}.mp3`));
+    for (const f of ceFiles) await fs.copyFile(path.join(__dirname, '..', 'test-fixture.mp3'), f);
+    const ceOriginalBounds = mainWindow.getBounds();
+    const execE = (c) => mainWindow.webContents.executeJavaScript(c, true);
+    mainWindow.setContentSize(1000, 700);
+    await sleep(500);
+    const mk = (i) => `{ title: 'End Song ${i}', artist: 'End Artist', album: 'Album', albumArtist: '', year: 2005, duration: 20, genre: '', thumb: null, lyrics: null,
+      trackNumber: '', trackTotal: '', discNumber: '', discTotal: '', composer: '', comment: '', bpm: '', bitrate: 320, codecProfile: null,
+      dateAdded: ${i}, playCount: 0, lastPlayed: null, filePath: ${JSON.stringify(ceFiles[i - 1])} }`;
+    await execE(`window.__sonusTest.setLibrary([${mk(1)}, ${mk(2)}]); window.__sonusTest.setView('library'); 0`);
+    await waitFor(`document.querySelectorAll('.track-list .track-row').length`, v => v === 2);
+    await execE(`document.querySelectorAll('.track-list .track-row')[0].dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); 0`);
+    await waitFor(`(() => { const a = document.querySelector('audio'); return !!a && !a.paused && a.src.includes('smoke-chillend-1'); })()`, v => v === true);
+    // repeat off, no shuffle: the second song follows the first. Not looping: it has to END.
+    await execE(`(() => { const a = document.querySelector('audio'); a.loop = false; })()`);
+    await execE(`window.__sonusTest.setView('now_playing'); window.__sonusTest.setChillMode(true); 0`);
+    await waitFor(`!!document.querySelector('.chill-scene')`, v => v === true);
+    const chromeOpacity = `(() => { const op = (s) => { const e = document.querySelector(s); return e ? Number(getComputedStyle(e).opacity) : -1; };
+      return Math.max(op('.chill-bar'), op('.nav-pill'), op('.chill-exit-btn'), op('.chill-scene-btn')); })()`;
+    const faded = await waitFor(chromeOpacity, v => v === 0, { timeout: 12000 });
+    check(faded === 0, `the chrome fades out while the song plays (max opacity ${faded})`);
+    for (let i = 0; i < 40 && mainWindow.__sonusButtonsVisible !== false; i++) await sleep(150);
+    check(mainWindow.__sonusButtonsVisible === false, 'and the traffic lights are hidden');
+
+    // jump to just before the end and watch what happens through the change to song 2 and 4.6s beyond
+    await execE(`(() => { const a = document.querySelector('audio'); a.currentTime = Math.max(0, a.duration - 0.8); })()`);
+    let seenMax = 0, lightsSeen = false, secondPlayingAt = null;
+    const watchUntil = Date.now() + 40000;
+    while (Date.now() < watchUntil) {
+      seenMax = Math.max(seenMax, await execE(chromeOpacity));
+      if (mainWindow.__sonusButtonsVisible) lightsSeen = true;
+      if (secondPlayingAt === null) {
+        const on2 = await execE(`(() => { const a = document.querySelector('audio'); return !!a && !a.paused && a.src.includes('smoke-chillend-2'); })()`);
+        if (on2) secondPlayingAt = Date.now();
+      } else if (Date.now() - secondPlayingAt > 4600) break;
+      await new Promise(r => setTimeout(r, 60));
+    }
+    check(secondPlayingAt !== null, 'the next song really started when the first ended');
+    check(seenMax === 0, `the chrome stays hidden through the song change and the ${'4.6'}s after it (highest opacity seen ${seenMax})`);
+    check(lightsSeen === false, 'and the traffic lights never come back');
+
+    // when playback genuinely STOPS (the last song ends, nothing follows) the controls do come back
+    await execE(`(() => { const a = document.querySelector('audio'); a.currentTime = Math.max(0, a.duration - 0.8); })()`);
+    const stopped = await waitFor(`(() => { const a = document.querySelector('audio'); return !!a && a.paused; })()`, v => v === true, { timeout: 15000 });
+    const back = await waitFor(chromeOpacity, v => v === 1, { timeout: 8000 });
+    check(stopped === true && back === 1, `when the last song ends and playback really stops, the controls come back (paused ${stopped}, opacity ${back})`);
+
+    await execE(`window.__sonusTest.setChillMode(false); window.__sonusTest.setView('library'); window.__sonusTest.setLibrary([]); 0`);
+    mainWindow.setBounds(ceOriginalBounds);
+    await sleep(300);
+    for (const f of ceFiles) await fs.rm(f, { force: true });
+  } catch (err) {
+    failures.push(`chill song-end error: ${err.stack || err}`);
+  }
+
+  // ── Chill mode: entering and switching scenes never shows anything half-loaded ──
+  // Samples the DOM every ~40ms through a cold entry and cold switches. A "stage" (a scene's
+  // drawing box) is VISIBLE when its own opacity times every ancestor's is > 2%; it is READY
+  // when its photo is decoded and, for an animated scene, its first frame is drawn (or WebGL
+  // is unavailable and the still photo is the scene). Visible-but-not-ready is the bug: a
+  // brown box, then the photo popping in, then the animation starting. Written against
+  // structure that exists both before and after the layered switching (every .chill-stage),
+  // so it can be run against the old behaviour to prove it fails there.
+  if (wants('chillswitch')) try {
+    const csFile = path.join(app.getPath('userData'), 'smoke-chillswitch.mp3');
+    await fs.copyFile(path.join(__dirname, '..', 'test-fixture.mp3'), csFile);
+    const csOriginalBounds = mainWindow.getBounds();
+    const execW = (c) => mainWindow.webContents.executeJavaScript(c, true);
+    mainWindow.setContentSize(1000, 700);
+    await sleep(500);
+    await execW(`window.__sonusTest.setLibrary([{ title: 'Switch Song', artist: 'Switch Artist', album: 'Album', albumArtist: '', year: 2006, duration: 20, genre: '', thumb: null, lyrics: null,
+      trackNumber: '', trackTotal: '', discNumber: '', discTotal: '', composer: '', comment: '', bpm: '', bitrate: 320, codecProfile: null,
+      dateAdded: 1, playCount: 0, lastPlayed: null, filePath: ${JSON.stringify(csFile)} }]); window.__sonusTest.setView('library'); window.__sonusTest.setChillScene('turntable'); 0`);
+    await waitFor(`document.querySelectorAll('.track-list .track-row').length`, v => v === 1);
+    await execW(`document.querySelector('.track-list .track-row').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); 0`);
+    await waitFor(`(() => { const a = document.querySelector('audio'); if (a) a.loop = true; return !!a && !a.paused; })()`, v => v === true);
+
+    const probe = `(() => {
+      const eff = (el) => { let o = 1; for (let e = el; e && e !== document.body; e = e.parentElement) o *= Number(getComputedStyle(e).opacity); return o; };
+      const root = document.querySelector('.chill-scene');
+      if (!root) return null;
+      const stages = [...root.querySelectorAll('.chill-stage')].map((st) => {
+        const photo = st.querySelector('.chill-photo'); const cv = st.querySelector('.chill-living');
+        const photoOk = !!photo && photo.complete && photo.naturalWidth > 0;
+        const liveOk = !cv || cv.dataset.live === 'true' || cv.dataset.gl === 'fallback';
+        return { kind: st.querySelector('.chill-disc') ? 'turntable' : st.querySelector('[data-chill-laptop]') ? 'room' : 'beach', vis: eff(st), ready: photoOk && liveOk };
+      });
+      const layerOps = [...root.querySelectorAll('.chill-layer')].map((l) => Number(getComputedStyle(l).opacity));
+      const btn = document.querySelector('.chill-scene-btn');
+      return { rootOp: Number(getComputedStyle(root).opacity), stages, layerOps, state: root.dataset.chillState || null, scene: root.dataset.scene,
+        spinning: btn ? btn.dataset.loading === 'true' : null, bar: document.querySelector('.chill-bar')?.__csId || null };
+    })()`;
+    const watch = async (until, ms) => {
+      const seen = { violations: [], dips: 0, states: new Set(), spinWhileLoading: 0, loadingSamples: 0, noSpinAfter: false, maxStages: 0, samples: 0 };
+      const end = Date.now() + ms;
+      while (Date.now() < end) {
+        const s = await execW(probe);
+        if (s) {
+          seen.samples += 1;
+          if (s.state) seen.states.add(s.state);
+          seen.maxStages = Math.max(seen.maxStages, s.stages.length);
+          for (const st of s.stages) if (st.vis > 0.02 && !st.ready) seen.violations.push(`${st.kind} visible at ${st.vis.toFixed(2)} before it was ready`);
+          // a crossfade must never dip: while the scene is fully shown, some layer is fully opaque
+          if (s.layerOps.length && s.rootOp > 0.99 && Math.max(...s.layerOps) < 0.99) seen.dips += 1;
+          if (s.state === 'loading' && s.spinning !== null) { seen.loadingSamples += 1; if (s.spinning) seen.spinWhileLoading += 1; }
+          if (until(s)) return { seen, last: s };
+        }
+        await new Promise(r => setTimeout(r, 40));
+      }
+      return { seen, last: await execW(probe) };
+    };
+
+    // Make every image take 700ms to be reported ready (test-mode only: chillPreload.js), so the
+    // loading window is long enough to be observed instead of lasting a few frames.
+    await execW(`window.__sonusChillLoadDelayMs = 700; 0`);
+
+    // ── entering Chill mode, with every image slow to load ──
+    await execW(`window.__sonusTest.setView('now_playing'); window.__sonusTest.setChillMode(true); 0`);
+    const entry = await watch(s => s.rootOp > 0.99 && s.stages.length === 1 && s.stages[0].ready && s.stages[0].vis > 0.99, 15000);
+    check(entry.seen.violations.length === 0, `entering Chill mode never shows the scene before it is ready (${entry.seen.violations.slice(0, 2).join('; ') || 'none'}; ${entry.seen.samples} samples)`);
+    check(entry.last && entry.last.rootOp > 0.99 && entry.last.stages[0]?.ready, 'and the scene is fully shown and ready once it fades in');
+    check(entry.seen.states.has('loading'), `the first scene really did load before it was shown (states seen: ${[...entry.seen.states].join(', ')})`);
+    await execW(`document.querySelector('.chill-bar').__csId = 'same-bar'; 0`);
+
+    // ── switching to a scene that has never been loaded ──
+    for (const target of ['beach', 'room']) {
+      await execW(`window.__sonusTest.setChillScene(${JSON.stringify(target)}); 0`);
+      const sw = await watch(s => s.scene === target && s.state === 'ready' && s.stages.length === 1 && s.rootOp > 0.99, 20000);
+      check(sw.seen.violations.length === 0, `switching to the ${target} scene never shows it before it is ready (${sw.seen.violations.slice(0, 2).join('; ') || 'none'})`);
+      check(sw.last && sw.last.scene === target && sw.last.state === 'ready' && sw.last.stages.length === 1, `...and ends with exactly that one scene on screen (${JSON.stringify(sw.last && { scene: sw.last.scene, state: sw.last.state, stages: sw.last.stages.length })})`);
+      check(sw.seen.dips === 0, `the crossfade to ${target} never dips (${sw.seen.dips} samples with no fully opaque layer)`);
+      check(sw.seen.maxStages <= 2, `at most two scenes exist at once (${sw.seen.maxStages})`);
+      check(sw.seen.states.has('loading') && sw.seen.states.has('fading'), `the switch went through loading, then a fade (states seen: ${[...sw.seen.states].join(', ')})`);
+      check(sw.seen.loadingSamples > 0 && sw.seen.spinWhileLoading === sw.seen.loadingSamples, `the scene button spins exactly while ${target} loads (${sw.seen.spinWhileLoading}/${sw.seen.loadingSamples} loading samples)`);
+      check(sw.last && sw.last.spinning === false, 'and stops spinning once it is shown');
+    }
+    check(await execW(`document.querySelector('.chill-bar').__csId`) === 'same-bar', 'the bar is the same element after switching (it never blinked)');
+
+    // ── two quick picks: the last one wins, and the abandoned one is never shown ──
+    await execW(`window.__sonusTest.setChillScene('turntable'); window.__sonusTest.setChillScene('beach'); 0`);
+    const quick = await watch(s => s.scene === 'beach' && s.state === 'ready' && s.stages.length === 1, 20000);
+    check(quick.last && quick.last.scene === 'beach' && quick.last.stages.length === 1 && quick.seen.violations.length === 0,
+      `picking twice in a row ends on the last choice, with nothing half-loaded shown (${quick.last && quick.last.scene}, ${quick.seen.violations.length} violations)`);
+
+    await execW(`window.__sonusTest.setChillScene('turntable'); 0`);
+    await watch(s => s.scene === 'turntable' && s.state === 'ready' && s.stages.length === 1, 15000);
+    await execW(`delete window.__sonusChillLoadDelayMs; 0`);
+    await execW(`window.__sonusTest.setChillMode(false); window.__sonusTest.setView('library'); (() => { const a = document.querySelector('audio'); if (a) { a.loop = false; a.pause(); } })(); window.__sonusTest.setLibrary([]); 0`);
+    mainWindow.setBounds(csOriginalBounds);
+    await sleep(300);
+    await fs.rm(csFile, { force: true });
+  } catch (err) {
+    failures.push(`chill switch error: ${err.stack || err}`);
   }
 
   // ── Tag write round-trip over real IPC (MP3 path + index/thumb sync) ──────
@@ -2379,6 +2916,48 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     check(movedState.length === 4, `play-next on an existing track adds no duplicate row (${movedState.length})`);
     check(movedState[1] === copyD, `play-next moves an already-present track to right after the current one (index ${movedState.indexOf(copyD)})`);
     check(movedState[0] === copyA, 'play-next on an existing track leaves the current track in place');
+
+    // 11. A FOLDER handed over by a Finder Service (right-click a folder > Sonus -
+    // Add to Queue / Play Next / Play): it must arrive as the songs inside it, all
+    // the way down, in natural order (track 2 before track 10), skipping what is
+    // not music. Real files: a copy of the fixture each.
+    const folderRoot = path.join(udir, 'smoke-folder-service');
+    await fs.rm(folderRoot, { recursive: true, force: true });
+    await fs.mkdir(path.join(folderRoot, 'Album', 'Disc 2'), { recursive: true });
+    const folderFiles = ['Album/10 Tenth.mp3', 'Album/2 Second.mp3', 'Album/01 First.mp3', 'Album/Disc 2/01 Disc Two.mp3'];
+    for (const rel of folderFiles) await fs.copyFile(path.join(__dirname, '..', 'test-fixture.mp3'), path.join(folderRoot, rel));
+    await fs.writeFile(path.join(folderRoot, 'Album', 'cover.txt'), 'not music');
+    await fs.writeFile(path.join(folderRoot, 'Album', '.DS_Store'), 'x');
+    const inOrder = ['Album/01 First.mp3', 'Album/2 Second.mp3', 'Album/10 Tenth.mp3', 'Album/Disc 2/01 Disc Two.mp3'].map(r => path.join(folderRoot, r));
+    const libOf = () => mainWindow.webContents.executeJavaScript(`window.__sonusTest.getLibrary().map(t => t.filePath)`, true);
+
+    for (const [action, label, startIndex] of [['add-to-queue', 'Sonus - Add to Queue', 3], ['play-next', 'Sonus - Play Next', 1]]) {
+      mainWindow.webContents.send('open-external-file', { tracks: multi.tracks, failedCount: 0 });
+      await sleep(400);
+      await fs.writeFile(path.join(udir, SERVICE_FLAG), action);
+      seedOpenFileBatch([folderRoot]);
+      await loadLibraryState();
+      const lib = await waitFor(`window.__sonusTest.getLibrary().map(t => t.filePath)`, v => Array.isArray(v) && v.length === 3 + inOrder.length);
+      check(lib.length === 3 + inOrder.length, `${label} on a folder adds the 4 songs inside it, nested ones included, and nothing else (${lib.length - 3} added)`);
+      check(JSON.stringify(lib.slice(startIndex, startIndex + inOrder.length)) === JSON.stringify(inOrder),
+        `${label} on a folder queues them in natural order, track 2 before track 10 (${JSON.stringify(lib.slice(startIndex, startIndex + 4).map(p => path.relative(folderRoot, p)))})`);
+      check(lib[0] === copyA, `${label} on a folder leaves the current track first`);
+    }
+
+    // Sonus - Play: no flag, a plain open - the library becomes exactly the folder's songs and plays from the first.
+    await fs.rm(path.join(udir, SERVICE_FLAG), { force: true });
+    seedOpenFileBatch([folderRoot]);
+    const playState = await loadLibraryState();
+    check(JSON.stringify(playState.tracks.map(t => t.filePath)) === JSON.stringify(inOrder),
+      `Sonus - Play on a folder replaces the library with its songs in order (${playState.tracks.length} tracks)`);
+    check(playState.autoPlay === true && playState.currentTrackPath === inOrder[0], `...and starts the first one (${playState.currentTrackPath && path.relative(folderRoot, playState.currentTrackPath)})`);
+
+    // Files and a folder together keep the order they were given in (files by name, the folder in its slot).
+    seedOpenFileBatch([folderRoot, copyD]);
+    const mixedState = await loadLibraryState();
+    check(mixedState.tracks.length === 5 && mixedState.tracks.some(t => t.filePath === copyD) && mixedState.tracks.filter(t => t.filePath.startsWith(folderRoot)).length === 4,
+      `a folder and a file selected together both arrive (${mixedState.tracks.length} tracks)`);
+    await fs.rm(folderRoot, { recursive: true, force: true });
 
     await mainWindow.webContents.executeJavaScript(`window.__sonusTest.setView('library'); window.__sonusTest.setLibrary([]);`, true);
     await sleep(150);
