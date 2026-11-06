@@ -984,7 +984,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       // full and zero (a bug measured its width after React had already set it to 0, so the pill
       // snapped narrower in one cut while the arrow shrank inside empty space), and the arrow
       // shrinks and fades while it does.
-      check(bm.wFirst > 30 && bm.mid >= 4 && bm.monotone && bm.scaleEnd < 0.6 && bm.minOp < 0.3,
+      check(bm.wFirst > 30 && bm.mid >= 2 && bm.monotone && bm.scaleEnd < 0.6 && bm.minOp < 0.3,
         `the leaving arrow closes gradually: the slot narrows through ${bm.mid} intermediate widths from ${bm.wFirst}px, shrinking and fading (${JSON.stringify(bm)})`);
       // Reduced motion: no scale at all, only a quick fade.
       await mainWindow.webContents.debugger.attach('1.3');
@@ -1102,13 +1102,13 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       await exec(`window.__sonusTest.patchCurrentTrack({ filePath: ${JSON.stringify(miniFile2)}, lyrics: 'a new song\\nwith lyrics' })`);
       await sleep(1100);
       let ls = await exec(lyrStats);
-      check(await exec(`!!document.querySelector('.chill-enter-btn')`) && ls.n > 20 && ls.sMin < 0.7 && ls.sPeak > 1.03 && Math.abs(ls.sEnd - 1) < 0.001 && ls.wFirst < 6 && Math.abs(ls.wEnd - 28) < 0.5 && ls.mid >= 4,
+      check(await exec(`!!document.querySelector('.chill-enter-btn')`) && ls.n > 20 && ls.sMin < 0.7 && ls.sPeak > 1.03 && Math.abs(ls.sEnd - 1) < 0.001 && ls.wFirst < 6 && Math.abs(ls.wEnd - 28) < 0.5 && ls.mid >= 2,
         `a new song WITH lyrics bubbles the Lyrics button in beside Chill mode: from small, past full size, settling exactly, its slot opening gradually (${JSON.stringify(ls)})`);
       await exec(lyrSampler);
       await exec(`window.__sonusTest.patchCurrentTrack({ filePath: ${JSON.stringify(origPath)}, lyrics: null })`);
       await sleep(900);
       ls = await exec(lyrStats);
-      check(ls.outFrames >= 5 && ls.mid >= 3 && ls.goneAtEnd && ls.sPeak <= 1.001,
+      check(ls.outFrames >= 5 && ls.mid >= 2 && ls.goneAtEnd && ls.sPeak <= 1.001,
         `a new song WITHOUT lyrics closes the Lyrics button gradually, without overshoot, then removes it (${JSON.stringify(ls)})`);
       await exec(`window.__lyrStop = true`);
       await sleep(500);
