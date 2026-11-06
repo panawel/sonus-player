@@ -1373,9 +1373,12 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
 
       // the whole chrome melts away together after a quiet few seconds while
       // playing: the bar, the title strip's buttons, and the traffic lights
+      // If this fails, say what held the chrome up: something waking it, or a pointer resting on it.
+      await execC(`(() => { const w = window.__wakes = { n: 0, last: [] }; for (const t of ['mousemove', 'mousedown', 'keydown', 'wheel']) window.addEventListener(t, (e) => { w.n++; w.last = [t, e.isTrusted, e.clientX, e.clientY, String(e.target.className || e.target.tagName).slice(0, 40)]; }, true); })()`);
       const gone = await waitFor(chrome, v => allOpacity(v, '0'), 9000);
+      const whyUp = allOpacity(gone, '0') ? '' : await execC(`JSON.stringify({ wakes: window.__wakes, hover: [...document.querySelectorAll('[data-chill-chrome]:hover')].map(e => String(e.className).slice(0, 40)), menu: !!document.querySelector('.track-dropdown'), search: !!document.querySelector('.search-panel'), picker: !!document.querySelector('.chill-picker'), dialog: !!document.querySelector('.confirm-modal-panel'), paused: document.querySelector('audio')?.paused })`);
       check(allOpacity(gone, '0') && gone.idle && gone.tabsInert && gone.exitInert,
-        `bar, tabs, search, add and exit all fade out together and stop taking clicks (${JSON.stringify(gone)})`);
+        `bar, tabs, search, add and exit all fade out together and stop taking clicks (${JSON.stringify(gone)} ${whyUp})`);
       check(await lights(false) === true, 'the traffic lights hide once the fade has finished');
       // ...and come back when the pointer moves (reported by main, since the
       // title strip is a drag area the page never sees the pointer over)
