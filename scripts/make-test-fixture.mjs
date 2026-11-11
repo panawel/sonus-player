@@ -19,7 +19,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import NodeID3 from 'node-id3';
+import { updateFile } from 'music-metadata';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -54,32 +54,12 @@ FRAME_HEADER.copy(frame, 0);
 
 await fs.writeFile(OUT, Buffer.concat(Array.from({ length: frameCount }, () => frame)));
 
-const ok = NodeID3.write(
-  {
-    title: 'Sonus Test Tone',
-    artist: 'Sonus',
-    album: 'Test Fixture',
-    performerInfo: 'Sonus',
-    year: '2026',
-    genre: 'Test',
-    trackNumber: '1/1',
-    comment: { language: 'eng', text: 'Generated fixture — see scripts/make-test-fixture.mjs' },
-    // Embedded cover art is load-bearing: it drives the thumbnail pipeline,
-    // the artwork-normalisation path and the fs:readArtwork assertions.
-    image: {
-      mime: 'image/jpeg',
-      type: { id: 3, name: 'front cover' },
-      description: 'Cover',
-      imageBuffer: await fs.readFile(COVER),
-    },
-  },
-  OUT
-);
-
-if (!ok) {
-  console.error('node-id3 failed to write tags');
-  process.exit(1);
-}
+await updateFile(OUT, {
+  title: 'Sonus Test Tone', artist: 'Sonus', album: 'Test Fixture', albumartist: 'Sonus',
+  date: '2026', genre: 'Test', track: { no: 1, of: 1 },
+  comment: { language: 'eng', text: 'Generated fixture — see scripts/make-test-fixture.mjs' },
+  picture: [{ format: 'image/jpeg', type: 'Cover (front)', description: 'Cover', data: await fs.readFile(COVER) }]
+});
 
 const { size } = await fs.stat(OUT);
 console.log(`wrote ${path.relative(ROOT, OUT)} — ${(size / 1024).toFixed(1)} KB, ${frameCount} frames (~${DURATION_SECONDS}s)`);

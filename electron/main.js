@@ -1,10 +1,10 @@
+import { writeEditorTags, serializeTagWrite } from './tagWriter.mjs';
 import { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, clipboard, nativeImage, protocol, screen } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import * as mm from 'music-metadata';
-import NodeID3 from 'node-id3';
 import windowStateKeeper from 'electron-window-state';
 import { normalizePicture, pictureToDataUrl } from './artwork.mjs';
 import { createIndexStore, diffPaths } from './indexStore.mjs';
@@ -1167,218 +1167,6 @@ ipcMain.on('open-external-url', (event, url) => {
   shell.openExternal(url);
 });
 
-// ── FLAC pure-JS tag writer ───────────────────────────────────────────────────
-// Rewrites the VORBIS_COMMENT (type 4) and PICTURE (type 6) metadata blocks
-// while leaving STREAMINFO and audio frames completely untouched.
-
-function flacBlockHeader(blockType, isLast, dataLen) {
-  const h = Buffer.alloc(4);
-  h[0] = (isLast ? 0x80 : 0x00) | (blockType & 0x7F);
-  h.writeUIntBE(dataLen, 1, 3);
-  return h;
-}
-
-function buildVorbisCommentData(fields) {
-  // fields: array of [NAME, value] pairs where value is a non-empty string
-  const vendor = Buffer.from('Sonus', 'utf8');
-  const vendorLen = Buffer.alloc(4);
-  vendorLen.writeUInt32LE(vendor.length, 0);
-  const countBuf = Buffer.alloc(4);
-  countBuf.writeUInt32LE(fields.length, 0);
-  const entryBufs = fields.flatMap(([name, val]) => {
-    const entry = Buffer.from(`${name}=${val}`, 'utf8');
-    const lenBuf = Buffer.alloc(4);
-    lenBuf.writeUInt32LE(entry.length, 0);
-    return [lenBuf, entry];
-  });
-  return Buffer.concat([vendorLen, vendor, countBuf, ...entryBufs]);
-}
-
-function buildFlacPictureData(imageBuffer, mimeType) {
-  const mime = Buffer.from(mimeType, 'ascii');
-  const buf = Buffer.alloc(4 + 4 + mime.length + 4 + 0 + 4 * 4 + 4 + imageBuffer.length);
-  let o = 0;
-  buf.writeUInt32BE(3, o); o += 4;          // front cover
-  buf.writeUInt32BE(mime.length, o); o += 4;
-  mime.copy(buf, o); o += mime.length;
-  buf.writeUInt32BE(0, o); o += 4;          // description length = 0
-  buf.writeUInt32BE(0, o); o += 4;          // width (unknown)
-  buf.writeUInt32BE(0, o); o += 4;          // height
-  buf.writeUInt32BE(0, o); o += 4;          // color depth
-  buf.writeUInt32BE(0, o); o += 4;          // color count
-  buf.writeUInt32BE(imageBuffer.length, o); o += 4;
-  imageBuffer.copy(buf, o);
-  return buf;
-}
-
-async function writeFlacTags(filePath, tags) {
-  const file = await fs.readFile(filePath);
-
-  // Some encoders (Picard, iTunes, etc.) prepend a non-standard ID3v2 header before
-  // the fLaC marker. Skip it — Vorbis Comment is the correct FLAC metadata container.
-  let flacStart = 0;
-  if (file.length >= 10 && file[0] === 0x49 && file[1] === 0x44 && file[2] === 0x33) {
-    const flags = file[5];
-    const id3Size =
-      ((file[6] & 0x7f) << 21) | ((file[7] & 0x7f) << 14) |
-      ((file[8] & 0x7f) << 7)  |  (file[9] & 0x7f);
-    flacStart = 10 + id3Size + (flags & 0x10 ? 10 : 0);
-  }
-  if (flacStart + 4 > file.length || file.slice(flacStart, flacStart + 4).toString('ascii') !== 'fLaC') {
-    throw new Error('Not a FLAC file');
-  }
-
-  // Parse all metadata blocks
-  const blocks = [];
-  let pos = flacStart + 4;
-  let last = false;
-  while (!last && pos < file.length) {
-    if (pos + 4 > file.length) break;
-    const b0 = file[pos];
-    last = !!(b0 & 0x80);
-    const type = b0 & 0x7F;
-    const len = file.readUIntBE(pos + 1, 3);
-    blocks.push({ type, data: file.slice(pos + 4, pos + 4 + len) });
-    pos += 4 + len;
-  }
-  const audioStart = pos; // everything from here on is audio — we never touch it
-  const audioData = file.slice(audioStart);
-
-  // Build Vorbis Comment fields from tags
-  const vcFields = [];
-  const add = (name, val) => { if (val != null && String(val).trim() !== '') vcFields.push([name, String(val)]); };
-  add('TITLE',       tags.title);
-  add('ARTIST',      tags.artist);
-  add('ALBUM',       tags.album);
-  add('DATE',        tags.year);
-  add('GENRE',       tags.genre);
-  add('ALBUMARTIST', tags.albumArtist);
-  add('COMPOSER',    tags.composer);
-  add('COMMENT',     tags.comment);
-  add('BPM',         tags.bpm);
-  if (tags.lyrics != null && tags.lyrics !== '') vcFields.push(['LYRICS', tags.lyrics]);
-  // Track / disc numbers
-  if (tags.trackNumber || tags.trackTotal) {
-    const num = (tags.trackNumber || '').trim();
-    const tot = (tags.trackTotal  || '').trim();
-    add('TRACKNUMBER', num && tot ? `${num}/${tot}` : (num || tot));
-  }
-  if (tags.discNumber || tags.discTotal) {
-    const num = (tags.discNumber || '').trim();
-    const tot = (tags.discTotal  || '').trim();
-    add('DISCNUMBER', num && tot ? `${num}/${tot}` : (num || tot));
-  }
-
-  // Resolve artwork
-  let pictureData = null;
-  const removePicture = 'picture' in tags && tags.picture === null;
-  if (tags.picture) {
-    const m = tags.picture.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-    if (m) pictureData = buildFlacPictureData(Buffer.from(m[2], 'base64'), m[1]);
-  }
-
-  // Reconstruct block list: keep STREAMINFO + other non-VC/PICTURE blocks + new VC + new PICTURE
-  const outBlocks = [];
-  for (const blk of blocks) {
-    if (blk.type === 4) continue; // drop old VORBIS_COMMENT
-    if (blk.type === 6) continue; // drop old PICTURE blocks
-    if (blk.type === 1) continue; // drop old PADDING (we'll add fresh padding at end)
-    outBlocks.push(blk);
-  }
-  outBlocks.push({ type: 4, data: buildVorbisCommentData(vcFields) });
-  if (!removePicture && pictureData) outBlocks.push({ type: 6, data: pictureData });
-  else if (!removePicture && !pictureData) {
-    // No artwork change — restore whatever PICTURE blocks were in the original
-    for (const blk of blocks) {
-      if (blk.type === 6) outBlocks.push(blk);
-    }
-  }
-
-  // Append 8KB padding block to avoid full rewrites on future edits
-  const PADDING_SIZE = 8192;
-  outBlocks.push({ type: 1, data: Buffer.alloc(PADDING_SIZE) });
-
-  // Serialize
-  const parts = [Buffer.from('fLaC', 'ascii')];
-  for (let i = 0; i < outBlocks.length; i++) {
-    const isLast = i === outBlocks.length - 1;
-    parts.push(flacBlockHeader(outBlocks[i].type, isLast, outBlocks[i].data.length));
-    parts.push(outBlocks[i].data);
-  }
-  parts.push(audioData);
-
-  await fs.writeFile(filePath, Buffer.concat(parts));
-  return true;
-}
-
-// ── WAV RIFF id3 chunk tag writer ─────────────────────────────────────────────
-// Embeds ID3v2 tags in a RIFF 'id3 ' chunk (correct WAV convention).
-// Uses NodeID3.create() to produce the ID3 payload, then splices/replaces
-// the id3 chunk within the RIFF structure without touching audio chunks.
-
-async function writeWavTags(filePath, tags) {
-  // Build the ID3 payload (re-use the same mapping as MP3 save)
-  const id3Tags = {};
-  if (tags.title)       id3Tags.title = tags.title;
-  if (tags.artist)      id3Tags.artist = tags.artist;
-  if (tags.album)       id3Tags.album = tags.album;
-  if (tags.year)        id3Tags.year = String(tags.year);
-  if (tags.genre)       id3Tags.genre = tags.genre;
-  if (tags.composer)    id3Tags.composer = tags.composer;
-  if (tags.bpm)         id3Tags.bpm = String(tags.bpm);
-  if (tags.albumArtist) id3Tags.performerInfo = tags.albumArtist;
-  if (tags.comment)     id3Tags.comment = { language: 'eng', text: tags.comment };
-  if (tags.lyrics)      id3Tags.unsynchronisedLyrics = { language: 'eng', text: tags.lyrics };
-  if (tags.picture) {
-    const m = tags.picture.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-    if (m) id3Tags.image = { mime: m[1], type: { id: 3, name: 'front cover' }, description: 'Cover', imageBuffer: Buffer.from(m[2], 'base64') };
-  }
-  // trackNumber / discNumber
-  const tnum = (tags.trackNumber || '').trim(), ttot = (tags.trackTotal || '').trim();
-  if (tnum || ttot) id3Tags.trackNumber = tnum && ttot ? `${tnum}/${ttot}` : (tnum || ttot);
-  const dnum = (tags.discNumber || '').trim(), dtot = (tags.discTotal || '').trim();
-  if (dnum || dtot) id3Tags.partOfSet = dnum && dtot ? `${dnum}/${dtot}` : (dnum || dtot);
-
-  const id3Payload = NodeID3.create(id3Tags); // returns Buffer, no file I/O
-
-  const file = await fs.readFile(filePath);
-  if (file.slice(0, 4).toString('ascii') !== 'RIFF') throw new Error('Not a WAV file');
-
-  // Parse RIFF chunks
-  const chunks = []; // { fourcc, offset, size } — offset points at fourcc
-  let p = 12; // skip RIFF header (4) + file size (4) + 'WAVE' (4)
-  while (p + 8 <= file.length) {
-    const fourcc = file.slice(p, p + 4).toString('ascii');
-    const sz = file.readUInt32LE(p + 4);
-    chunks.push({ fourcc, offset: p, size: sz });
-    p += 8 + sz + (sz % 2); // RIFF chunks are word-aligned
-    if (p > file.length) break;
-  }
-
-  // Build output without existing id3 chunk, then append new one
-  const parts = [];
-  for (const ch of chunks) {
-    if (ch.fourcc === 'id3 ' || ch.fourcc === 'ID3 ') continue;
-    const padded = ch.size + (ch.size % 2);
-    parts.push(file.slice(ch.offset, ch.offset + 8 + padded));
-  }
-  // Append new id3 chunk
-  const id3Chunk = Buffer.alloc(8 + id3Payload.length + (id3Payload.length % 2));
-  id3Chunk.write('id3 ', 0, 'ascii');
-  id3Chunk.writeUInt32LE(id3Payload.length, 4);
-  id3Payload.copy(id3Chunk, 8);
-  parts.push(id3Chunk);
-
-  const chunkData = Buffer.concat(parts);
-  const riffHeader = Buffer.alloc(12);
-  riffHeader.write('RIFF', 0, 'ascii');
-  riffHeader.writeUInt32LE(chunkData.length + 4, 4); // +4 for 'WAVE'
-  riffHeader.write('WAVE', 8, 'ascii');
-
-  await fs.writeFile(filePath, Buffer.concat([riffHeader, chunkData]));
-  return true;
-}
-
 // After a successful tag write: keep the index entry in sync (so the next
 // launch serves the new values without a re-parse) and regenerate/remove the
 // thumbnail if artwork changed. Returns the track's new thumb URL.
@@ -1416,89 +1204,14 @@ async function syncIndexAfterTagWrite(filePath, tags) {
   return thumb;
 }
 
-ipcMain.handle('fs:writeTag', async (event, filePath, tags) => {
+ipcMain.handle('fs:writeTag', (event, filePath, tags) => serializeTagWrite(filePath, async () => {
   try {
     const ext = path.extname(filePath).toLowerCase();
     let ok = false;
 
-    if (ext === '.flac') {
-      ok = await writeFlacTags(filePath, tags);
-    } else if (ext === '.wav') {
-      ok = await writeWavTags(filePath, tags);
-    } else {
-      const id3Tags = { ...tags };
-      const removePicture = 'picture' in tags && tags.picture === null;
-
-      if (tags.picture) {
-        const matches = tags.picture.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-        if (matches && matches.length === 3) {
-          id3Tags.image = {
-            mime: matches[1],
-            type: { id: 3, name: 'front cover' },
-            description: 'Cover',
-            imageBuffer: Buffer.from(matches[2], 'base64')
-          };
-        }
-      }
-      delete id3Tags.picture;
-
-      if ('lyrics' in id3Tags) {
-        if (id3Tags.lyrics) {
-          id3Tags.unsynchronisedLyrics = { language: 'eng', text: id3Tags.lyrics };
-        } else {
-          id3Tags.unsynchronisedLyrics = null;
-        }
-        delete id3Tags.lyrics;
-      }
-
-      // albumArtist → performerInfo (TPE2)
-      if ('albumArtist' in id3Tags) {
-        id3Tags.performerInfo = id3Tags.albumArtist || null;
-        delete id3Tags.albumArtist;
-      }
-
-      // trackNumber + trackTotal → combined TRCK frame ("4" or "4/12")
-      if ('trackNumber' in id3Tags || 'trackTotal' in id3Tags) {
-        const num = (id3Tags.trackNumber || '').trim();
-        const tot = (id3Tags.trackTotal  || '').trim();
-        id3Tags.trackNumber = num && tot ? `${num}/${tot}` : (num || tot || null);
-        delete id3Tags.trackTotal;
-      }
-
-      // discNumber + discTotal → partOfSet (TPOS, "1" or "1/2")
-      if ('discNumber' in id3Tags || 'discTotal' in id3Tags) {
-        const num = (id3Tags.discNumber || '').trim();
-        const tot = (id3Tags.discTotal  || '').trim();
-        id3Tags.partOfSet = num && tot ? `${num}/${tot}` : (num || tot || null);
-        delete id3Tags.discNumber;
-        delete id3Tags.discTotal;
-      }
-
-      // comment string → COMM object
-      if ('comment' in id3Tags) {
-        id3Tags.comment = id3Tags.comment
-          ? { language: 'eng', text: id3Tags.comment }
-          : null;
-      }
-
-      // bpm stays as-is (node-id3 accepts string); strip read-only fields
-      delete id3Tags.bitrate;
-      delete id3Tags.codecProfile;
-      delete id3Tags.thumb;
-      delete id3Tags.dateAdded;
-      delete id3Tags.playCount;
-      delete id3Tags.lastPlayed;
-
-      if (removePicture) {
-        // node-id3 0.2.x update() cannot remove tags — read all, delete image, write back
-        const existingTags = NodeID3.read(filePath);
-        if (typeof existingTags === 'object' && existingTags !== null) {
-          delete existingTags.image;
-          ok = !!NodeID3.write({ ...existingTags, ...id3Tags }, filePath);
-        }
-      } else {
-        ok = !!NodeID3.update(id3Tags, filePath);
-      }
+    if (['.flac', '.mp3', '.wav'].includes(ext)) {
+      await writeEditorTags(filePath, tags);
+      ok = true;
     }
 
     if (!ok) return { success: false, thumb: null };
@@ -1515,7 +1228,7 @@ ipcMain.handle('fs:writeTag', async (event, filePath, tags) => {
     event.sender.executeJavaScript(`console.error('[writeTag]', ${JSON.stringify(err.message)})`).catch(() => {});
     return { success: false, thumb: null };
   }
-});
+}));
 
 ipcMain.handle('clipboard:readImage', () => {
   const img = clipboard.readImage();

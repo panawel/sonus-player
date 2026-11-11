@@ -170,8 +170,8 @@ Everything is in the menu bar, with shortcuts that stay out of the way of typing
 
 Most players let you rename things in their own database. Sonus writes real tags back to disk:
 
-- **MP3** — ID3v2 via `node-id3`
-- **FLAC** — Vorbis Comments, through a purpose-built metadata-block writer
+- **MP3** — ID3v2.4 via [music-metadata](https://www.npmjs.com/package/music-metadata); existing ID3v2.3 tags convert automatically when rewritten
+- **FLAC** — Vorbis Comments and artwork via [music-metadata](https://www.npmjs.com/package/music-metadata)
 - **WAV** — an ID3 chunk spliced into the RIFF container
 
 Cover art (paste from clipboard, drop in a file, or pull from an online lookup), lyrics, track and disc numbers, composer, BPM, and more.
@@ -227,6 +227,13 @@ npm install
 npm run dev
 ```
 
+This integration requires Node.js 22 or newer. `music-metadata` 12.4.0
+or later and its dependencies are installed from npm; no sibling checkouts or
+local package builds are required. MP3, FLAC and WAV saves use music-metadata.
+Existing ID3v2.2/v2.3 tags are read through music-metadata and rewritten as
+ID3v2.4, retaining common metadata and applying the edits. Native fields without
+common mappings are not retained during legacy conversion.
+
 To produce a universal `.dmg` and `.zip` in `release/`:
 
 ```bash
@@ -259,7 +266,7 @@ If you're curious how it's put together, [`docs/ARCHITECTURE.md`](docs/ARCHITECT
 
 ## Built with
 
-[Electron](https://electronjs.org) · [React](https://react.dev) · [Vite](https://vite.dev) · [music-metadata](https://github.com/borewit/music-metadata) · [node-id3](https://github.com/Zazama/node-id3) · [TanStack Virtual](https://tanstack.com/virtual) · [dnd kit](https://dndkit.com) · [Lucide](https://lucide.dev) icons
+[Electron](https://electronjs.org) · [React](https://react.dev) · [Vite](https://vite.dev) · [music-metadata](https://github.com/borewit/music-metadata) · [TanStack Virtual](https://tanstack.com/virtual) · [dnd kit](https://dndkit.com) · [Lucide](https://lucide.dev) icons
 
 Online metadata from the [iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/), [MusicBrainz](https://musicbrainz.org), [Cover Art Archive](https://coverartarchive.org) and [lrclib](https://lrclib.net).
 

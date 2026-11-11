@@ -2682,7 +2682,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       check(flacResult.albumArtist === 'AA', `FLAC albumArtist round-trips (${name})`);
       // The writer must emit a clean file starting at fLaC (ID3 prefix dropped).
       const written = await fs.readFile(flacPath);
-      check(written.slice(0, 4).toString('ascii') === 'fLaC', `saved FLAC starts with fLaC marker (${name})`);
+      check(written.subarray(0, 4).toString('ascii') === 'fLaC', `saved FLAC starts with fLaC (${name})`);
       await fs.rm(flacPath, { force: true });
     }
   } catch (err) {
