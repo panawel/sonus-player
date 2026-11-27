@@ -114,12 +114,54 @@ export default function TagEditorWindow() {
   // Fires after the form above has actually re-rendered with the new track's
   // fields (loadedTrackKey is set in the same batch as setEditTags, so this
   // effect runs on the commit that follows). Auto-fits the window's height to
-  // the form's natural content height on every genuine track load — but never
-  // again afterward, so later state changes (Search Online results, typing,
-  // the async artwork swap) can't trigger a resize.
+  // the form's natural content height on every genuine track load.
+  // The form's natural height: the panel plus the scroller's own padding, rounded
+  // up. Not scrollHeight, which never reports less than the scroller's own height,
+  // so a form that got shorter would never shrink the window back.
+  const fittedHeightRef = useRef(null);
+  const formHeight = () => {
+    const form = scrollableRef.current;
+    const cs = getComputedStyle(form);
+    return Math.ceil(form.firstElementChild.getBoundingClientRect().height + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom));
+  };
+  // The first fit waits for the font if it is still loading: the window stays hidden until
+  // this first message (main.js), so waiting costs nothing visible, and fitting before it
+  // landed left the window ~6px short and then off-centre once it grew (see below).
   React.useLayoutEffect(() => {
-    if (!loadedTrackKey || !scrollableRef.current) return;
-    window.electronAPI?.resizeTagEditor?.(scrollableRef.current.scrollHeight);
+    if (!loadedTrackKey || !scrollableRef.current) return undefined;
+    let cancelled = false;
+    const fit = () => {
+      if (cancelled || !scrollableRef.current) return;
+      fittedHeightRef.current = formHeight();
+      window.electronAPI?.resizeTagEditor?.(fittedHeightRef.current);
+    };
+    // Measuring first forces the layout, which is what starts the font loading: before it,
+    // document.fonts still reports 'loaded' because nothing has asked for a face yet.
+    formHeight();
+    if (document.fonts?.status === 'loading') document.fonts.ready.then(fit, fit);
+    else fit();
+    return () => { cancelled = true; };
+  }, [loadedTrackKey]);
+  // ...and again whenever the form's own height changes after that. The bundled
+  // Inter font can finish loading just after the first fit: the text then grows
+  // (measured: 6px), and the form was left scrolling by that much, a small
+  // up-and-down that the lyrics' own scrolling spilled into at its ends. Nothing
+  // the user does changes this height (Search Online's results are an overlay,
+  // the artwork box is a fixed size, typing never grows a field), so this only
+  // follows the content itself. Compared with the last height sent, not the
+  // height at subscription: the font may already have landed by then.
+  React.useEffect(() => {
+    const form = scrollableRef.current;
+    const panel = form?.firstElementChild;
+    if (!loadedTrackKey || !panel || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => {
+      const h = formHeight();
+      if (h === fittedHeightRef.current) return;
+      fittedHeightRef.current = h;
+      window.electronAPI?.resizeTagEditor?.(h);
+    });
+    ro.observe(panel);
+    return () => ro.disconnect();
   }, [loadedTrackKey]);
 
   // Closing is blocked mid-pick: handlePickResult is still fetching artwork and
@@ -467,7 +509,9 @@ export default function TagEditorWindow() {
                 placeholder="Paste or type lyrics…"
                 value={editTags.lyrics}
                 onChange={e => setEditTags({...editTags, lyrics: e.target.value})}
-                style={{ flex: 1, minHeight: 200, padding: '8px 12px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text-primary)', outline: 'none', resize: 'none', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.7, boxSizing: 'border-box', direction: teaLyricsIsRTL ? 'rtl' : 'ltr', textAlign: teaLyricsIsRTL ? 'right' : 'left' }}
+                style={{ flex: 1, minHeight: 200,
+                  overscrollBehavior: 'contain', // scrolling the lyrics past their ends never moves the form
+                  padding: '8px 12px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text-primary)', outline: 'none', resize: 'none', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.7, boxSizing: 'border-box', direction: teaLyricsIsRTL ? 'rtl' : 'ltr', textAlign: teaLyricsIsRTL ? 'right' : 'left' }}
               />
             </div>
           )}

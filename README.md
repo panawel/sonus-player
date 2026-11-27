@@ -4,9 +4,9 @@
 
 # Sonus
 
-**A beautiful, native-feeling music player for macOS.**
+### The music player your Mac deserves.
 
-Glassmorphic UI, a tag editor that actually writes to disk, scenes for when you just want to sit back and listen — and it stays smooth at 20,000 tracks.
+**Beautiful. Fast. Free. Private.** Your own music library, in a glass-smooth app that fills itself with the colours of whatever is playing.
 
 [![Latest release](https://img.shields.io/github/v/release/panawel/sonus-player?style=flat-square&color=0A84FF)](https://github.com/panawel/sonus-player/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/panawel/sonus-player/total?style=flat-square&color=0A84FF)](https://github.com/panawel/sonus-player/releases)
@@ -14,199 +14,196 @@ Glassmorphic UI, a tag editor that actually writes to disk, scenes for when you 
 ![macOS 12+](https://img.shields.io/badge/macOS-12%2B-black?style=flat-square&logo=apple)
 ![Universal](https://img.shields.io/badge/Universal-Intel%20%2B%20Apple%20Silicon-black?style=flat-square)
 
-<img src="docs/assets/hero.png" alt="Sonus — Now Playing" width="860">
+<img src="docs/assets/hero.jpg" alt="Sonus: Now Playing with the Library beside it" width="860">
+
+**[⬇ Download Sonus for macOS — free](https://github.com/panawel/sonus-player/releases/latest)**
+
+One download for every Mac, Intel or Apple Silicon · macOS 12 or newer
 
 </div>
 
 ---
 
-## Download
+## Why you'll love it
 
-**[⬇ Download Sonus for macOS](https://github.com/panawel/sonus-player/releases/latest)** — universal `.dmg`, runs natively on both Intel and Apple Silicon.
+- 🎨 **It looks stunning.** Glass everywhere, and a living, slowly flowing background painted from each song's cover. Every song gets its own mood.
+- ⚡ **It stays fast.** Smooth with **20,000 songs**. Re-sorting your whole library is instant. Every screenshot here is a real 3,600-song library.
+- 🔒 **It's private.** **0** accounts, **0** ads, **0** tracking. Nothing leaves your Mac unless you click a button that says so.
+- ✍️ **It fixes your tags for real.** Titles, artists, covers and lyrics are written **into the file itself** (MP3, FLAC and WAV), not into some hidden database. One click finds the right tags and cover online.
+- 🛋️ **It knows how to relax.** **Chill mode** turns your song into a living scene: a spinning record, a hammock by the sea, a rainy study room.
+- 📐 **It fits anywhere.** Full screen, phone-narrow, a tiny mini player, or a slim strip that sits right next to the Dock.
+- 💸 **It's free and open source.** Forever. No trial, no subscription.
 
-Open the `.dmg`, drag **Sonus** to your Applications folder, then read the next section before launching — it takes ten seconds and saves confusion.
+Plays **MP3, FLAC, WAV, OGG, M4A and AAC**.
 
-### What's new in 1.7
+---
 
-- **[Chill mode](#chill-mode)** — turn Now Playing into a scene: a spinning turntable, a hammock by the sea, or a rainy study room. Rain, waves, lightning, and the song's own lyrics typed out on a laptop.
-- **[Three window modes](#one-window-three-shapes)** — normal, phone-narrow, and a tiny mini player, switchable from the **File** menu or by simply resizing.
-- **[A real menu bar](#menus-and-shortcuts)** — a rebuilt **File** menu and a new **Controls** menu, with keyboard shortcuts for everything.
-- **[Search](#search)** is now a floating panel (`⌘F`) over whatever page you're on.
-- **[A clearer add-songs dialog](#adding-music)** that says what each choice does, and works in every window size.
-- **A calmer track list** — white selection, animated "now playing" bars, a footer with the song count and total time, and a refreshed icon.
+## What's new in 1.9
+
+- **Your Library beside the song.** Now Playing can share the window with your Library, or with the lyrics. Pick either from the small pill at the top right.
+- **A Now Playing tab** in the top bar, which takes you straight back to your song exactly as you left it.
+- **Living colour.** The background flows with the colours of the cover, behind every page, and changes the instant you skip.
+- **Lyrics you can actually read.** Big, centred lines, and the ones you're reading light up as you scroll.
+- **Search, rebuilt.** Just start typing in the Library. Words in any order, accents ignored, matches highlighted.
+- **Strip mode.** A slim player that docks beside the macOS Dock and stays out of your way.
+- **It comes back as you left it.** Reopen Sonus to the same song, paused where you stopped, with your queue, shuffle and repeat.
+- **Home** now filters everything by decade with a single row of tags.
+- **A new floating player**, tinted with the colours of the song.
+
+---
+
+## Take the tour
+
+### Now Playing, the way it should be
+
+Big artwork, a background that takes the cover's colours, and lyrics that are a pleasure to read. Hebrew and Arabic lyrics show right-to-left, the way they should. Want your Library or the lyrics next to the song? One tap.
+
+<img src="docs/assets/now-playing-lyrics.jpg" alt="Now Playing with the lyrics beside the song" width="860">
+
+### Home: your music, at a glance
+
+A featured artist, quick picks, your latest releases, and one row of decades that filters the whole page. Everything is a way into your music.
+
+<img src="docs/assets/home.jpg" alt="Home" width="860">
+
+Scroll down and see your library like never before: songs by year, sound quality, how complete your tags are, and which languages you listen to. **Every bar is clickable.** Tap "128 kbps" to find the songs that sound worst, or "missing lyrics" to go fill them in.
+
+<img src="docs/assets/stats.jpg" alt="Library stats: songs by year, sound quality, completeness and languages" width="860">
+
+### A library that keeps up with you
+
+Click a column to sort. Start typing to search. Drag to reorder, multi-select with `⇧` and `⌘`. Smooth whether you have 300 songs or 20,000.
+
+<img src="docs/assets/library.jpg" alt="The Library" width="860">
+
+Click any artist, album, year or quality to get its own page, with Play, Shuffle, and a menu for **Play Next**, **Start Mix** (similar songs from your own library), **Edit Tags** and more.
+
+<img src="docs/assets/details.jpg" alt="An artist page with the track menu" width="860">
+
+### Chill mode
+
+One click on the palm tree (or `⇧⌘C`) and your song becomes a scene, with its artwork built right in:
+
+- **The turntable.** Your cover is the spinning record.
+- **The hammock.** Your cover glows on a phone, swinging gently by the sea while the palms sway and the waves roll in.
+- **The study room.** Your cover hangs on the walls of a rainy room, with lightning, steam from the mug, and a girl typing the song's own lyrics on her laptop.
+
+<div align="center">
+<img src="docs/assets/chill-mode.gif" alt="Chill mode: the turntable scene" width="800">
+</div>
+
+The controls fade away when you stop moving the mouse. Just the music and the scene.
+
+### One app, every size
+
+Drag the window's edge, or pick a size from the **File** menu. Same library, same controls.
+
+<p align="center">
+<img src="docs/assets/narrow-home.jpg" alt="Home at phone width" width="200">
+<img src="docs/assets/narrow-library.jpg" alt="Library at phone width" width="200">
+<img src="docs/assets/narrow-details.jpg" alt="An artist page at phone width" width="200">
+<img src="docs/assets/narrow-now-playing.jpg" alt="Now Playing at phone width" width="200">
+</p>
+
+Make it short and it becomes a **mini player**. Shrink it further and it becomes the **strip**, a slim player that sits right beside your Dock:
+
+<p align="center">
+<img src="docs/assets/mini-mode.jpg" alt="The mini player" width="380">
+<br><br>
+<img src="docs/assets/strip-mode.jpg" alt="Strip mode, beside the Dock" width="500">
+</p>
+
+<details>
+<summary><b>All the sizes</b></summary>
+
+| | Size | What you get |
+| --- | --- | --- |
+| **Filled Screen** `⌃⌘M` | fills the screen | the full layout |
+| **Narrow** `⌥⌘2` | 440 × 760 | a phone-style layout with a compact player |
+| **Mini** `⌥⌘3` | 380 × 200 | artwork, title, seek bar and controls |
+| **Strip** `⌥⌘4` | a slim capsule | cover, title, seek line and controls, beside the Dock. Drag it anywhere; let go near the Dock and it snaps back in. `Esc` or a click on the cover brings the full window back |
+
+</details>
+
+### A tag editor that actually saves
+
+Messy titles? Missing covers? Fix them once and for all. Sonus writes your changes **into the music file itself**, so they follow your songs everywhere, into any other player.
+
+<img src="docs/assets/tag-editor.jpg" alt="The Tag Editor" width="860">
+
+Hit **Search Online** and Sonus finds the right title, album, year, full-size cover and lyrics. Pick a match and you're done in two clicks.
+
+<img src="docs/assets/search-online.jpg" alt="Search Online results" width="860">
+
+<details>
+<summary><b>Which formats it can write</b></summary>
+
+- **MP3**: ID3v2 tags
+- **FLAC**: Vorbis comments
+- **WAV**: an ID3 chunk inside the file
+
+Covers (paste, drop a file, or find one online), lyrics, track and disc numbers, composer, BPM and more.
+
+</details>
+
+### Feels right at home on your Mac
+
+- **Double-click any song** in Finder to play it in Sonus
+- **Right-click songs or a whole folder** in Finder → *Sonus - Play*, *Play Next* or *Add to Queue*
+- **Media keys** and Control Centre's Now Playing, with artwork
+- **Close the window and the music keeps playing**, like any Mac music player (`⌘Q` to quit)
+- **Drag and drop** files or folders, or press `⌘O`
+
+<details>
+<summary><b>Keyboard shortcuts</b></summary>
+
+| | |
+| --- | --- |
+| **File** | Add Music `⌘O` · Filled Screen `⌃⌘M` · Narrow `⌥⌘2` · Mini `⌥⌘3` · Strip `⌥⌘4` · Chill `⇧⌘C` |
+| **Controls** | Play/Pause `Space` · Next `⌥⌘→` · Previous `⌥⌘←` · Shuffle `⇧⌘S` · Repeat `⌥⌘R` · Go to Current Song `⌘L` |
+| **Anywhere** | Search `⌘F` · Select all `⌘A` · Remove from list `⌫` · Seek ±5 s `←` `→` · Leave Mini, Strip or Chill `Esc` |
+
+</details>
 
 ---
 
 ## Opening Sonus the first time
 
-Sonus is **not code-signed with an Apple Developer certificate**, because that costs $99/year and this is a free, open-source project. macOS therefore shows a warning the first time you open it:
+Sonus is free, so it isn't signed with a paid ($99/year) Apple certificate. The first time you open it, macOS warns you that it can't check the app. That's all it means. You only do this **once**:
 
-> **"Sonus" cannot be opened because Apple cannot check it for malicious software.**
+**macOS 12, 13 and 14:** right-click **Sonus** in Applications → **Open** → **Open**.
 
-This is macOS telling you it doesn't know who built the app — not that anything is wrong with it. You only have to do this **once**.
+**macOS 15 and newer:** try to open Sonus, then go to  → **System Settings** → **Privacy & Security**, scroll to Security, and click **Open Anyway**.
 
-**On macOS 12, 13 and 14** (Monterey, Ventura, Sonoma)
-
-1. Right-click (or Control-click) **Sonus** in your Applications folder
-2. Choose **Open**
-3. Click **Open** in the dialog
-
-**On macOS 15 and newer** (Sequoia and later) — Apple removed the right-click shortcut
-
-1. Try to open Sonus normally; the warning appears
-2. Go to  → **System Settings** → **Privacy & Security**
-3. Scroll down to Security — you'll see *"Sonus was blocked…"* — and click **Open Anyway**
-
-**Or, from Terminal** — the one-liner equivalent:
+**Or in Terminal:**
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Sonus.app
 ```
 
-Every release publishes **SHA-256 checksums** so you can verify your download matches what was built:
+Every release lists **SHA-256 checksums** so you can check your download is exactly what was built:
 
 ```bash
-shasum -a 256 ~/Downloads/Sonus-1.8.0-universal.dmg
+shasum -a 256 ~/Downloads/Sonus-1.9.0-universal.dmg
 ```
 
-> Prefer not to run unsigned software? [Build it yourself](#building-from-source) — it's four commands.
-
----
-
-## Features
-
-### A real music library, not a file list
-
-Drop a folder in and Sonus reads the tags, extracts cover art, and builds a browsable library. Sorting is driven by clicking a column — no menus. Multi-select with `⇧`/`⌘`, drag to reorder, delete with `⌫`. The song playing right now is marked with animated bars where its number would be, the selection is a clean white ring, and a footer under the list tells you how many songs you're looking at and how long they run.
-
-**It stays fast when the library gets big.** Every screenshot here is a real ~4,000-track library, and the track list is fully virtualized: at 20,000 tracks fewer than 80 rows exist in the DOM at any moment, and re-sorting the whole library is effectively instant. Album art never lives in memory as base64 — tracks carry a thumbnail reference, and full-resolution art is loaded only when something actually displays it.
-
-<img src="docs/assets/library.png" alt="Library view" width="860">
-
-### Home — your library, visualised
-
-Not a dashboard for its own sake: every panel is a way into your music. A rotating featured artist, quick picks, latest releases, and genre and decade filters that apply across the whole screen.
-
-<img src="docs/assets/home.png" alt="Home view" width="860">
-
-Further down, your library as data: songs by year, a sound-quality breakdown by bitrate, how complete your metadata actually is, and a language split. Every segment is clickable — tap the 128 kbps slice to see exactly which tracks are dragging your library down, or the missing lyrics to go fix them.
-
-<img src="docs/assets/stats.png" alt="Library statistics — songs by year, sound quality, completeness and languages" width="860">
-
-Click any artist, album, year or quality tier and you land on its own page, with the same track list engine, a Play All / Shuffle header, and a right-click menu for Play Next, Start Mix, Edit Tags, Reveal in Finder and more.
-
-<img src="docs/assets/details.png" alt="Artist details page with the track context menu" width="860">
-
-### Search
-
-`⌘F` (or the search button) opens a floating panel over whatever page you're on: artists, albums and songs from your whole library — or just the page you're looking at, when you're on a details page. The list behind it filters live as you type.
-
-### Now Playing
-
-Full-window artwork with an ambient colour wash sampled from the cover, and embedded lyrics in a side panel — with right-to-left script detection, so Hebrew and Arabic lyrics render correctly instead of backwards.
-
-<img src="docs/assets/now-playing-lyrics.png" alt="Now Playing with lyrics" width="860">
-
-The player floats at the bottom of every page as a glass pill: artwork, seek line, and transport controls. **Shuffle** and **repeat** show a small dot under the icon when they're on, so you can tell at a glance.
-
-### Chill mode
-
-At full width, one click (or **File → Chill Mode**, `⇧⌘C`) turns Now Playing into a scene, picked from a small popup. The song's artwork is part of every one:
-
-- **The turntable** — the artwork becomes the spinning record.
-- **The hammock** — the artwork is the screen of a phone held by someone swinging by the sea. The palms sway, the sea shimmers, waves wash up the shore, and the whole hammock rocks.
-- **The study room** — the artwork hangs on the posters and polaroids of a rainy room. Rain runs down the window, lightning flashes now and then, steam rises from the mug, and a girl types — and stops — to your music. On her laptop's screen: the song's own lyrics, when it has them.
-
-<div align="center">
-<img src="docs/assets/chill-mode.gif" alt="Chill mode — the turntable scene" width="800">
-</div>
-
-A minimal bar fades away (traffic lights and all) when you stop moving the mouse, and the framing adapts to any window size.
-
-### One window, three shapes
-
-The window isn't locked to one desktop shape. Pick a shape from the **File** menu — or just drag the window's edge:
-
-| | Size | What changes |
-| --- | --- | --- |
-| **Filled Screen Mode** | fills the screen | the full desktop layout |
-| **Narrow Mode** | 440 × 760 | a phone-portrait layout: icon-only tabs, a compact player, and a single-column Now Playing with a switch to the lyrics from the title bar |
-| **Mini Mode** | 380 × 200 | just the artwork, track, seek line and transport controls |
-
-Same library, same tag editor, same controls — just narrower. Make a window short and it becomes the mini player; make it tall again and you're back exactly where you were.
-
-<p align="center">
-<img src="docs/assets/narrow-home.png" alt="Home at phone-portrait width" width="200">
-<img src="docs/assets/narrow-library.png" alt="Library at phone-portrait width" width="200">
-<img src="docs/assets/narrow-details.png" alt="Artist details page at phone-portrait width" width="200">
-<img src="docs/assets/narrow-now-playing.png" alt="Now Playing at phone-portrait width" width="200">
-</p>
-
-<p align="center">
-<img src="docs/assets/mini-mode.png" alt="The mini player" width="380">
-</p>
-
-### Adding music
-
-Drag files or folders onto the window, press `⌘O`, or use the **+** button. If your library already has songs, Sonus asks what you want — and tells you, on hover, exactly what each choice does:
-
-- **Play now** — replaces your current library with these songs and starts playing
-- **Play next** — right after the current song
-- **Add to queue** — at the end of your library
-
-The dialog has its own compact layout for the mini player, and you can still drag the window around while it's open.
-
-### Menus and shortcuts
-
-Everything is in the menu bar, with shortcuts that stay out of the way of typing (Space still types a space in a search box).
-
-| | |
-| --- | --- |
-| **File** | Add Music `⌘O` · Filled Screen Mode `⌃⌘M` · Narrow Mode `⌥⌘2` · Mini Mode `⌥⌘3` · Chill Mode `⇧⌘C` |
-| **Controls** | Play/Pause `Space` · Next `⌥⌘→` · Previous `⌥⌘←` · Shuffle `⇧⌘S` · Repeat `⌥⌘R` (off / all / one) · Go to Current Song `⌘L` |
-| **Anywhere** | Search `⌘F` · Select all `⌘A` · Remove from list `⌫` · Seek ±5 s `←` `→` · Leave mini player or Chill mode `Esc` |
-
-### A tag editor that writes to the file
-
-Most players let you rename things in their own database. Sonus writes real tags back to disk:
-
-- **MP3** — ID3v2 via `node-id3`
-- **FLAC** — Vorbis Comments, through a purpose-built metadata-block writer
-- **WAV** — an ID3 chunk spliced into the RIFF container
-
-Cover art (paste from clipboard, drop in a file, or pull from an online lookup), lyrics, track and disc numbers, composer, BPM, and more.
-
-<img src="docs/assets/tag-editor.png" alt="Tag Editor" width="860">
-
-**Search Online** queries the iTunes catalogue and falls back to MusicBrainz, de-duplicates the results, then fetches full-resolution artwork and lyrics for whichever release you pick — so fixing a badly-tagged track is two clicks rather than a typing exercise.
-
-<img src="docs/assets/search-online.png" alt="Search Online results" width="860">
-
-### Properly integrated with macOS
-
-- **Double-click any audio file** in Finder to open it in Sonus
-- **Finder Services** — right-click songs **or a whole folder** → Services → *Sonus - Add to Queue*, *Sonus - Play Next* or *Sonus - Play* (a folder brings every song inside it, subfolders included, in track order)
-- **Media keys and the Now Playing widget** in Control Centre, with artwork
-- **Closing the window keeps playing**, like every native macOS player — quit with `⌘Q`
-- Remembers window position, your library, and where you were in the current track
-
-Supports **MP3, FLAC, WAV, OGG, M4A and AAC**.
+> Prefer not to run unsigned apps? [Build it yourself](#building-from-source). It's four commands.
 
 ---
 
 ## Privacy
 
-Your music library, play counts and files stay on your Mac. There are no accounts, no analytics and no telemetry of any kind — nothing about what you listen to is ever sent anywhere.
+Your music, play counts and files stay on your Mac. No accounts, no analytics, no telemetry. Sonus makes **no network requests at all when it starts**, and works fully offline.
 
-**Sonus never touches the network unless you explicitly ask it to.** There are exactly three things that reach out, all user-initiated:
+It only goes online when **you** click one of these:
 
-| When | What it contacts | Why |
+| When you click | What it contacts | Why |
 | --- | --- | --- |
-| You click **Search Online** in the Tag Editor | iTunes Search API, MusicBrainz, Cover Art Archive, lrclib | Look up tags, cover art and lyrics for the track you're editing |
-| You click **Start Mix** on a track | MusicBrainz, ListenBrainz Labs, Deezer | Find similar tracks in your library — all three are free and keyless, no account needed |
-| You click **Search in YouTube** | Opens youtube.com in your browser | You asked it to |
+| **Search Online** in the Tag Editor | iTunes Search API, MusicBrainz, Cover Art Archive, lrclib, lyrics.ovh | Find tags, covers and lyrics for the song you're editing |
+| **Start Mix** on a song | MusicBrainz, ListenBrainz Labs, Deezer | Find similar songs in your library (free, no account) |
+| **Search in YouTube** | Opens youtube.com in your browser | You asked it to |
 
-That's the whole list. The UI font is bundled in the app rather than fetched from a CDN, so Sonus makes **no requests at all on launch** and behaves identically offline.
+That's the whole list.
 
 ---
 
@@ -214,9 +211,9 @@ That's the whole list. The UI font is bundled in the app rather than fetched fro
 
 | | |
 | --- | --- |
-| **macOS** | 12.0 Monterey or newer |
-| **Mac** | Any Intel or Apple Silicon Mac — single universal binary |
-| **Disk** | ~500MB installed (a universal build carries both architectures) |
+| **macOS** | 12 Monterey or newer |
+| **Mac** | Any Intel or Apple Silicon Mac (one universal app) |
+| **Disk** | ~500MB |
 
 ## Building from source
 
@@ -227,41 +224,40 @@ npm install
 npm run dev
 ```
 
-To produce a universal `.dmg` and `.zip` in `release/`:
+<details>
+<summary><b>Building, testing and how it's made</b></summary>
+
+Build a universal `.dmg` and `.zip` into `release/`:
 
 ```bash
 npm run build
 ```
 
-Other useful commands:
+Checks:
 
 ```bash
 npm test                     # unit tests
 npm run lint
-./scripts/verify-bundle.sh   # structural checks on a packaged .app
+./scripts/verify-bundle.sh release/mac-universal/Sonus.app --expect-universal
 ```
 
-There's also an end-to-end smoke suite that runs against the **built** app — real Electron, real Chromium — covering the metadata pipeline, tag round-trips for all three writable formats, launch behaviour, the track list, every window mode, the menus, Chill mode's scenes, and a 20,000-track performance bench:
+There's also an end-to-end smoke suite that drives the **built** app (real Electron, real Chromium): the metadata pipeline, tag writing for all three formats, every window size, the menus, Chill mode's scenes, and a 20,000-song speed test.
 
 ```bash
 npx vite build && npx electron . --smoke
 ```
 
-While developing, run just the part you touched: `npx electron . --smoke --only=menus`.
+While developing, run just the part you touched: `npx electron . --smoke --only=menus`. The full packaging walkthrough is in [`BUILD_INSTRUCTIONS.md`](BUILD_INSTRUCTIONS.md).
 
-See [`BUILD_INSTRUCTIONS.md`](BUILD_INSTRUCTIONS.md) for the full packaging walkthrough.
+Sonus is an Electron app with a React 19 interface, with a strict wall between the two: the interface has no direct access to your system, and everything it can do is declared in one place. Curious how it's built? [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is a deep dive.
 
-## Architecture
-
-Electron main process, a preload bridge, and a React 19 renderer, with strict separation between them — the renderer has no Node access and every capability it has is declared explicitly in the preload.
-
-If you're curious how it's put together, [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is a genuine deep dive: how the metadata index and thumbnail cache keep large libraries cheap, why the track list's column header lives outside the scroll container, how launch arbitration decides what library you get when you double-click a file, how Chill mode's animated scenes are built, and a number of hard-won constraints that fail silently if you break them.
+</details>
 
 ## Built with
 
 [Electron](https://electronjs.org) · [React](https://react.dev) · [Vite](https://vite.dev) · [music-metadata](https://github.com/borewit/music-metadata) · [node-id3](https://github.com/Zazama/node-id3) · [TanStack Virtual](https://tanstack.com/virtual) · [dnd kit](https://dndkit.com) · [Lucide](https://lucide.dev) icons
 
-Online metadata from the [iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/), [MusicBrainz](https://musicbrainz.org), [Cover Art Archive](https://coverartarchive.org) and [lrclib](https://lrclib.net).
+Online data from the [iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/), [MusicBrainz](https://musicbrainz.org), [Cover Art Archive](https://coverartarchive.org), [lrclib](https://lrclib.net), [lyrics.ovh](https://lyrics.ovh), [ListenBrainz](https://listenbrainz.org) and [Deezer](https://www.deezer.com).
 
 ## License
 

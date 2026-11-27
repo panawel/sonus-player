@@ -1,4 +1,4 @@
-import { ChevronUp, ChevronDown, AlignJustify, LayoutList } from 'lucide-react';
+import { ChevronUp, ChevronDown, AlignJustify, LayoutList, Search, X } from 'lucide-react';
 import cx from 'classnames';
 import { SORT_FIELDS, activeFieldForColumn, ART_SIZES } from './trackUtils.js';
 
@@ -47,14 +47,61 @@ export default function TrackListHeader({
   // exactly as-is; an array appends extra column labels after Time and adds
   // a trailing spacer matching the row's standalone ⋮ button slot.
   extraColumns = null,
+  // The Library's search (null elsewhere): a 🔍 in the leading slot; opened, the Title label
+  // becomes the search field, which grows out of the icon over the Title column. The other
+  // columns stay, so results can still be sorted. { open, query, count, total, inputRef,
+  // onOpen, onQueryChange, onClear, onClose } — App.jsx owns the state and the keys.
+  search = null,
 }) {
   const extended = extraColumns !== null;
+  const lead = 24 + 12 + ART_SIZES[density];
+  const open = !!search?.open;
   return (
     <div className="track-list-header" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
       {/* Leading spacer stands in for the row's index + artwork cells, so every
           label below sits over the column it actually sorts. */}
-      <div style={{ width: 24 + 12 + ART_SIZES[density], flexShrink: 0 }} />
-      <HeaderZone columnId="title" fallbackLabel="Title" sort={sort} onCycleColumn={onCycleColumn} style={{ flex: '1.6 1 0px', minWidth: 0 }} />
+      <div style={{ width: lead, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+        {search && (
+          <button
+            className={cx('track-header-search clickable', { hidden: open })}
+            title="Search (⌘F)"
+            aria-label="Search the Library"
+            tabIndex={open ? -1 : 0}
+            onClick={() => search.onOpen()}
+          >
+            <Search size={14} />
+          </button>
+        )}
+      </div>
+      <div className={cx('track-header-title-zone', { 'search-open': open })} style={{ flex: '1.6 1 0px', minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <HeaderZone columnId="title" fallbackLabel="Title" sort={sort} onCycleColumn={onCycleColumn} style={{ flex: '1 1 auto', minWidth: 0 }} />
+        {search && (
+          <label className={cx('list-search', { open })} style={{ left: -(lead + 12) }} data-list-search={open ? 'open' : 'closed'}>
+            <Search size={14} className="list-search-icon" />
+            <input
+              ref={search.inputRef}
+              value={search.query}
+              onChange={(e) => search.onQueryChange(e.target.value)}
+              placeholder="Search songs, artists, albums"
+              aria-label="Search the Library"
+              spellCheck={false}
+              autoComplete="off"
+              tabIndex={open ? 0 : -1}
+            />
+            {search.query.trim() && <span className="list-search-count">{search.count.toLocaleString()} of {search.total.toLocaleString()}</span>}
+            <button
+              className="list-search-clear clickable"
+              title={search.query ? 'Clear (Esc)' : 'Close (Esc)'}
+              aria-label={search.query ? 'Clear search' : 'Close search'}
+              tabIndex={open ? 0 : -1}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => { e.preventDefault(); if (search.query) search.onClear(); else search.onClose(); }}
+            >
+              <X size={11} />
+            </button>
+          </label>
+        )}
+      </div>
       {showAlbum && (
         <HeaderZone columnId="album" fallbackLabel="Album" sort={sort} onCycleColumn={onCycleColumn} style={{ flex: '1 1 0px', minWidth: 0 }} />
       )}

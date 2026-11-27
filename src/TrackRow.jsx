@@ -4,6 +4,13 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Music, MoreVertical, Play, Pause, Mic2 } from 'lucide-react';
 import cx from 'classnames';
 import { formatTime, displayValueForColumn, ROW_HEIGHTS, ART_SIZES } from './trackUtils.js';
+import { highlightParts } from './librarySearch.js';
+
+// A cell's text with the Library search's matched words lit (`.search-hit`); plain text otherwise.
+function Hit({ text, words }) {
+  if (!words?.length || !text) return text;
+  return highlightParts(String(text), words).map((p, i) => (p.hit ? <mark key={i} className="search-hit">{p.text}</mark> : p.text));
+}
 
 const TITLE_SIZE = { compact: 13, comfortable: 14 };
 const SUB_SIZE = { compact: 11, comfortable: 12 };
@@ -11,17 +18,17 @@ const SUB_SIZE = { compact: 11, comfortable: 12 };
 // One combined two-line cell (Title/Artist or Album/Year). `flip` swaps which
 // line is the bold primary — driven by the active sort field, so a list sorted
 // by Artist reads artist-first.
-function StackedCell({ top, bottom, flip, density, flexGrow }) {
+function StackedCell({ top, bottom, flip, density, flexGrow, words }) {
   const primary = flip ? bottom : top;
   const secondary = flip ? top : bottom;
   return (
     <div style={{ flex: `${flexGrow} 1 0px`, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: density === 'compact' ? 1 : 2 }}>
       <div style={{ fontWeight: 600, fontSize: TITLE_SIZE[density], whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-primary)', transition: 'font-size 0.15s ease' }}>
-        {primary || <span style={{ opacity: 0.35 }}>—</span>}
+        {primary ? <Hit text={primary} words={words} /> : <span style={{ opacity: 0.35 }}>—</span>}
       </div>
       {secondary ? (
         <div style={{ fontSize: SUB_SIZE[density], color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {secondary}
+          <Hit text={secondary} words={words} />
         </div>
       ) : null}
     </div>
@@ -31,7 +38,7 @@ function StackedCell({ top, bottom, flip, density, flexGrow }) {
 // One Library-only extra column cell (Album/Bitrate/Year/Genre) — a single
 // line, unlike StackedCell's two, and secondary-weight throughout since these
 // are supplementary metadata, not the row's identity like Title.
-function FlatCell({ value, flex, width, align, density, className, marginLeft }) {
+function FlatCell({ value, flex, width, align, density, className, marginLeft, words }) {
   return (
     <div className={className} style={{
       ...(width ? { width, flexShrink: 0 } : { flex: `${flex} 1 0px`, minWidth: 0 }),
@@ -42,7 +49,7 @@ function FlatCell({ value, flex, width, align, density, className, marginLeft })
       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
       fontVariantNumeric: align === 'right' ? 'tabular-nums' : undefined,
     }}>
-      {value || <span style={{ opacity: 0.35 }}>—</span>}
+      {value ? <Hit text={value} words={words} /> : <span style={{ opacity: 0.35 }}>—</span>}
     </div>
   );
 }
@@ -72,6 +79,8 @@ function TrackRowImpl({
   // switches to: lyrics, Duration, the extra columns, then a standalone ⋮
   // button pinned at the far right — see trackUtils.js.
   extraColumns = null,
+  // the Library search's words, lit in the text cells (null / [] = no search)
+  highlight = null,
   onRowClick, onRowDoubleClick, onPlayToggle, onRowMenu, onRowContextMenu,
 }) {
   const [hovered, setHovered] = useState(false);
@@ -160,12 +169,12 @@ function TrackRowImpl({
       </div>
 
       {/* Title / Artist — artist becomes primary when sorting by artist */}
-      <StackedCell top={track.title} bottom={track.artist} flip={sortField === 'artist'} density={density} flexGrow={1.6} />
+      <StackedCell top={track.title} bottom={track.artist} flip={sortField === 'artist'} density={density} flexGrow={1.6} words={highlight} />
 
       {/* Album / Year — year is no longer a sortable field, so this cell never
           flips; album stays the primary line. */}
       {showAlbum && (
-        <StackedCell top={track.album} bottom={track.year ? String(track.year) : ''} flip={false} density={density} flexGrow={1} />
+        <StackedCell top={track.album} bottom={track.year ? String(track.year) : ''} flip={false} density={density} flexGrow={1} words={highlight} />
       )}
 
       {/* Lyrics indicator */}
@@ -182,7 +191,7 @@ function TrackRowImpl({
               one (Album) gets a little breathing room after the right-aligned
               Duration number, which otherwise reads as crowded against it. */}
           {extraColumns.map((col, i) => (
-            <FlatCell key={col.id} value={displayValueForColumn(track, col.id)} flex={col.flex} width={col.width} align={col.align} density={density} marginLeft={i === 0 ? 20 : 0} />
+            <FlatCell key={col.id} value={displayValueForColumn(track, col.id)} flex={col.flex} width={col.width} align={col.align} density={density} marginLeft={i === 0 ? 20 : 0} words={highlight} />
           ))}
 
           {/* Row menu — pinned at the far right, hover-only, independent of Duration. */}

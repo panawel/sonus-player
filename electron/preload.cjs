@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkPaths: (paths) => ipcRenderer.invoke('fs:checkPaths', paths),
   loadLibraryState: () => ipcRenderer.invoke('library:load'),
   saveLibraryState: (state) => ipcRenderer.send('library:save', state),
+  saveLibraryStateSync: (state) => ipcRenderer.sendSync('library:save-sync', state),
+  // The session (electron/session.mjs): how the app was, restored on the next launch.
+  saveSession: (state) => ipcRenderer.send('session:save', state),
+  saveSessionSync: (state) => ipcRenderer.sendSync('session:save-sync', state),
   recordPlay: (filePath) => ipcRenderer.invoke('stats:recordPlay', filePath),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   readClipboardImage: () => ipcRenderer.invoke('clipboard:readImage'),
@@ -41,5 +45,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setChillChromeTracking: (enabled) => ipcRenderer.send('window:chill-chrome-tracking', enabled),
   onPointerMoved: (callback) => subscribe('window:pointer-moved', callback),
   setWindowButtonsVisible: (visible) => ipcRenderer.send('window:set-buttons-visible', visible),
-  dragWindow: (phase) => ipcRenderer.send('window:drag', phase)
+  dragWindow: (phase) => ipcRenderer.send('window:drag', phase),
+  // Strip mode (main.js owns it): the slim player beside the Dock is its own window
+  // (StripApp.jsx) while the main window is hidden and keeps playing. The main window is told
+  // when it's on, reports what is playing; the strip window gets that and sends commands back.
+  getStripMode: () => ipcRenderer.invoke('window:get-strip-mode'),
+  onStripMode: (callback) => subscribe('window:strip-mode', callback),
+  sendStripState: (state) => ipcRenderer.send('strip:state', state),
+  onStripCommand: (callback) => subscribe('strip:command', callback),
+  getStripState: () => ipcRenderer.invoke('strip:get-state'),
+  onStripState: (callback) => subscribe('strip:state', callback),
+  stripCommand: (cmd, value) => ipcRenderer.send('strip:command', { cmd, value }),
+  exitStripMode: () => ipcRenderer.send('window:strip-exit'),
+  // The top bar's Chill tab in a narrow window: fill the screen, then open Chill (File > Chill Mode)
+  enterChillMode: () => ipcRenderer.send('window:enter-chill'),
 });

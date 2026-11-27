@@ -1,5 +1,5 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, MoreVertical, Plus, Search, Home, Mic2, Disc3, Minimize2, Images } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, FolderOpen, Music, ListMusic, ChevronLeft, MoreVertical, Plus, Home, Disc3, Minimize2, Images } from 'lucide-react';
 import { FastAverageColor } from 'fast-average-color';
 import { arrayMove } from '@dnd-kit/sortable';
 import TrackList from './TrackList.jsx';
@@ -13,24 +13,30 @@ import HomeView from './HomeView';
 import HomeDetailView from './HomeDetailView';
 import PlayerPill, { PLAYER_PILL_TOTAL_HEIGHT, PLAYER_PILL_BOTTOM_MARGIN } from './PlayerPill.jsx';
 import MiniPlayer from './MiniPlayer.jsx';
+import { useWindowWidth } from './useWindowWidth.js';
+import { splitFits, splitColumnFit, SPLIT_SHEET_TOP, SPLIT_SHEET_MID, SPLIT_SHEET_EDGE, SPLIT_SHEET_RADIUS } from './splitView.js';
+import StripPlayer from './StripPlayer.jsx';
 import AddTracksDialog from './AddTracksDialog';
-import SearchPanel from './SearchPanel.jsx';
-import AmbientFlares from './AmbientFlares.jsx';
+import { searchWords, trackMatchesWords } from './librarySearch.js';
+import LiquidCover from './LiquidCover.jsx';
 import ChillScene from './ChillScene.jsx';
 import ChillScenePicker from './ChillScenePicker.jsx';
 import useChillChrome from './useChillChrome.js';
 import { CHILL_SCENES, getChillScene, loadChillSceneId, saveChillSceneId } from './chillScenes.js';
 import Bubble from './Bubble.jsx';
 import ArtCrossfade from './ArtCrossfade.jsx';
+import NowPlayingPill from './NowPlayingPill.jsx';
+import LyricsSpotlight from './LyricsSpotlight.jsx';
 import ColourLayers from './ColourLayers.jsx';
 import { coverCache, coverKey } from './coverCache.js';
 import { bubbleSpring } from './bubbleMotion.js';
 import PlayerPillNarrow, { PLAYER_PILL_NARROW_TOTAL_HEIGHT, PLAYER_PILL_NARROW_BOTTOM_MARGIN } from './PlayerPillNarrow.jsx';
 import cx from 'classnames';
 import { splitArtists, isRTL } from './audioUtils.js';
-import { __setMixCacheForTest } from './useMix.js';
+import { __setMixCacheForTest, getCachedMix, seedMixCache } from './useMix.js';
+import { glowRgb } from './glowColor.js';
 import {
-  LIBRARY_EXTRA_COLUMNS, trackMatchesQuery, ULTRA_COMPACT_PANEL_BREAKPOINT, NARROW_LAYOUT_BREAKPOINT, MINI_LAYOUT_HEIGHT_BREAKPOINT, TITLE_STRIP_HEIGHT,
+  LIBRARY_EXTRA_COLUMNS, ULTRA_COMPACT_PANEL_BREAKPOINT, NARROW_LAYOUT_BREAKPOINT, MINI_LAYOUT_HEIGHT_BREAKPOINT, MINI_MIN_HEIGHT, TITLE_STRIP_HEIGHT,
   LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT, extraColumnFitCount,
 } from './trackUtils.js';
 import './index.css';
@@ -62,6 +68,11 @@ const GLOW_FADE_MS = 600;
 // How long a skip keeps the previous cover up while the new sharp one loads, before the thumbnail
 // stands in.
 const COVER_WAIT_MS = 250;
+// The split's page fading out of the sheet as the lyrics fade in (see the split-motion effect).
+const SPLIT_PAGE_LEAVE_MS = 260;
+// The top bar's Now Playing tab: a fixed width, so its bubble slot springs to exactly its size.
+const NAV_NP_TAB_WIDTH = 118;
+const NAV_NP_TAB_WIDTH_NARROW = 33; // icon only, like Home and Library there
 
 const NARROW_PILL_CLEARANCE = PLAYER_PILL_NARROW_TOTAL_HEIGHT + PLAYER_PILL_NARROW_BOTTOM_MARGIN + 16;
 
@@ -100,6 +111,8 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [artworkRgb, setArtworkRgb] = useState(null);
+  // The players' glow (seek lines, the play disc) takes the artwork's colour: --art-rgb, see glowColor.js.
+  React.useEffect(() => { document.documentElement.style.setProperty('--art-rgb', glowRgb(artworkRgb)); }, [artworkRgb]);
   // Now Playing's cover, { key, src, sharp }: the file's own full-size cover (fs:readArtwork,
   // decoded ahead by coverCache.js) once it is ready, the library's 300px thumbnail only as a
   // stand-in (see the cover effect below).
@@ -115,8 +128,8 @@ export default function App() {
   const [hoverTime, setHoverTime] = useState(null);
   const [pendingNewTracks, setPendingNewTracks] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  // Whether the floating search panel (SearchPanel.jsx) is open. Opened by the
-  // title bar's search button or ⌘F; see searchScope and the page-change
+  // Whether the Library's search field (in its column header, TrackListHeader.jsx) is open.
+  // Opened by its 🔍, ⌘F or typing a letter on the Library; see openSearch and the page-change
   // effect further down for how it relates to the page underneath.
   const [searchOpen, setSearchOpen] = useState(false);
   // Row density shared by every tracklist (persisted).
@@ -131,16 +144,16 @@ export default function App() {
   // order — playback next/prev walks it, so "next" always matches what you see.
   const librarySortApi = useTrackSort(library, { storageKey: 'sonus.librarySort' });
   const sortedLibrary = librarySortApi.sorted;
-  // Filters against the same fields the Tag Editor exposes (Title/Artist/Album/Year/Genre).
-  // Purely a display-time filter over the loaded library - never mutates `library` itself.
-  // Only while Library is the page on screen: the same query box also drives a
-  // Details page's own list and Home's grouped results, and none of those may
-  // silently filter the Library behind them (playback order walks this list).
-  const librarySearchQuery = view === 'library' ? searchQuery : '';
+  // The Library's search (librarySearch.js): every word, in any order, across title, artist,
+  // album, year and genre, ignoring capitals and accents. Purely a display-time filter over the
+  // loaded library — never mutates `library` itself. Playback walks this list, so a song played
+  // from the results continues through the results. The search only exists on the Library (and
+  // the Library beside the song), and leaving it clears the text (the page-change effect).
+  const searchWordList = React.useMemo(() => searchWords(searchQuery), [searchQuery]);
   const visibleTracks = React.useMemo(() => {
-    if (!librarySearchQuery.trim()) return sortedLibrary;
-    return sortedLibrary.filter(t => trackMatchesQuery(t, librarySearchQuery));
-  }, [sortedLibrary, librarySearchQuery]);
+    if (!searchWordList.length) return sortedLibrary;
+    return sortedLibrary.filter(t => trackMatchesWords(t, searchWordList));
+  }, [sortedLibrary, searchWordList]);
   const librarySelection = useTrackSelection(visibleTracks);
   // Stable pieces of the selection API for use inside memoized callbacks.
   const { clear: clearLibrarySelection, prune: pruneLibrarySelection, selectedPathsRef: librarySelectedRef } = librarySelection;
@@ -159,6 +172,9 @@ export default function App() {
   const currentTrackRef = useRef(currentTrack);
   currentTrackRef.current = currentTrack;
   const [restoreAttempted, setRestoreAttempted] = useState(false);
+  // The session (see "The session" below): applied once the library is back; saved only after.
+  const applySessionRef = useRef(() => {});
+  const sessionReadyRef = useRef(false);
   // Applied once the restored "current" track's <audio> fires loadedmetadata - can't seek
   // before that, the element has no seekable duration yet.
   const pendingResumeTimeRef = useRef(0);
@@ -193,12 +209,42 @@ export default function App() {
   // MiniPlayer.jsx). Independent of isNarrowLayout: a 420x300 window is both,
   // and mini wins everywhere below.
   const isMiniLayout = useIsShort(MINI_LAYOUT_HEIGHT_BREAKPOINT);
+  // Now Playing with the Library beside it ("the split"): the song on the left half, exactly as
+  // it is beside its lyrics, and the Library on the right half — the real Library, mounted in the
+  // page scroller and moved over (see splitView.js). npBeside asks for it (the Library side
+  // button beside the cover); it only happens at full width, above SPLIT_MIN_WINDOW (900px),
+  // with a song loaded.
+  const windowWidth = useWindowWidth();
+  const [npBeside, setNpBeside] = useState(false);
+  const splitRoom = splitFits(windowWidth);
+  const splitPossible = !!currentTrack && !isNarrowLayout && !isMiniLayout && splitRoom;
+  // The Library beside the song, wherever the song was opened from (the side buttons choose it;
+  // the top bar's Library button is always the full Library).
+  const npSplitLibrary = view === 'now_playing' && npBeside && splitPossible;
+  // Leaving the split for the lyrics, the page fades out where it is (in the sheet) instead of
+  // vanishing: for SPLIT_PAGE_LEAVE_MS it keeps its split place ('library', or null when not
+  // leaving). Set by the split-motion effect below.
+  const [splitPageLeaving, setSplitPageLeaving] = useState(null);
+  const sheetLibrary = npSplitLibrary || splitPageLeaving === 'library';
+  // Shorter than the mini player's own minimum: the window is being shrunk into Strip mode, which
+  // main.js switches to when the resize ends. Until then the strip is previewed in place.
+  const isStripPreview = useIsShort(MINI_MIN_HEIGHT - 1);
+  // Strip mode (File > Strip Mode): the slim player beside the Dock is its OWN window
+  // (StripApp.jsx), and this one is hidden meanwhile, but the music is still played here. So
+  // while it's on, this page reports the player's state to it and takes its commands (below).
+  const [isStripMode, setIsStripMode] = useState(false);
+  React.useEffect(() => {
+    const api = window.electronAPI;
+    const unsubscribe = api?.onStripMode?.((on) => setIsStripMode(!!on));
+    api?.getStripMode?.().then((on) => setIsStripMode(!!on)).catch(() => {});
+    return unsubscribe;
+  }, []);
   // How many of LIBRARY_EXTRA_COLUMNS currently fit; the Album cutoff reuses
   // isUltraCompactPanel (see trackUtils.js for the cascade + why).
   const isLibraryYearColHidden = useIsNarrow(LIBRARY_YEAR_COL_BREAKPOINT);
   const isLibraryGenreColHidden = useIsNarrow(LIBRARY_GENRE_COL_BREAKPOINT);
   const visibleLibraryExtraColumns = LIBRARY_EXTRA_COLUMNS.slice(
-    0, extraColumnFitCount(isUltraCompactPanel, isLibraryYearColHidden, isLibraryGenreColHidden)
+    0, sheetLibrary ? splitColumnFit(windowWidth) : extraColumnFitCount(isUltraCompactPanel, isLibraryYearColHidden, isLibraryGenreColHidden)
   );
   // Soft edge fade for scrolling title/subtitle text, same WebkitMaskImage/
   // maskImage technique HomeView uses for its card-row edges — applied only
@@ -229,7 +275,7 @@ export default function App() {
   // null means plain/unlabeled playback. Shape: { label: 'Infected Mushroom',
   // item: { type: 'artist', key: 'Infected Mushroom' } }, `item` reusing the
   // exact shape `homeDetailItem` already uses, so "jump back" is just opening
-  // that same detail page. Purely in-memory UI state — never persisted, never
+  // that same detail page. UI state, kept across a relaunch by the session (below), never
   // something the user names or manages; see the queueSource-setting/-clearing
   // comments on playAllTracks/playTrack/playTrackFresh below for the rules.
   const [queueSource, setQueueSource] = useState(null);
@@ -280,12 +326,17 @@ export default function App() {
   // Home screen state
   const [homeDetailItem, setHomeDetailItem] = useState(null);
   const [homeDetailOrigin, setHomeDetailOrigin] = useState(null);
+  const npSplit = npSplitLibrary;
+  // The Library sits in the right-hand glass sheet: in the split, and while fading out of it.
+  const pageInSheet = sheetLibrary;
+  // The page that is showing as a page: the one beside the song in the split, else the view.
+  const pageView = npSplitLibrary ? 'library' : view;
   // Cmd+A routing (see activeSelectionRef above): Library claims the ref every
   // render; an open detail view owns it via its registration effect, so leave
   // it alone in that case and null it everywhere else.
-  if (view === 'library') {
+  if (pageView === 'library') {
     activeSelectionRef.current = librarySelection;
-  } else if (!(view === 'home' && homeDetailItem)) {
+  } else if (!(pageView === 'home' && homeDetailItem)) {
     activeSelectionRef.current = null;
   }
   // Reset detail view whenever the user leaves the home screen.
@@ -460,7 +511,7 @@ export default function App() {
       setRestoreAttempted(true);
       return;
     }
-    window.electronAPI.loadLibraryState().then(({ tracks, currentTrackPath, currentTime: savedTime, autoPlay, failedOpenCount }) => {
+    window.electronAPI.loadLibraryState().then(({ tracks, currentTrackPath, currentTime: savedTime, autoPlay, failedOpenCount, session }) => {
       // main.js falls back to the saved session when every file handed to us on
       // launch was unreadable - say so rather than silently ignoring the open.
       if (failedOpenCount > 0) {
@@ -480,8 +531,12 @@ export default function App() {
           }
           setCurrentTrack(restoredCurrent);
         }
+        if (session) applySessionRef.current(session, tracks, { hasTrack: !!restoredCurrent, openedFiles: !!autoPlay });
       }
-    }).finally(() => setRestoreAttempted(true));
+    }).finally(() => {
+      setRestoreAttempted(true);
+      sessionReadyRef.current = true; // from now on the session may be saved (never before: it would overwrite the saved one with defaults)
+    });
   }, [showToast]);
 
   // Debounced so rapid changes (bulk add, drag-reorder) don't spam disk writes. Gated on
@@ -1050,7 +1105,9 @@ export default function App() {
   // different sizes (it has the full screen width to itself, not a compact
   // capsule) and the dark chrome-text color scheme instead of the pill's
   // light one. Sizes are passed in explicitly for that reason.
-  const renderTransportControls = ({ playSize, playIconSize, playMargin, controlSize, secondarySize, withMenu = false }) => {
+  // menuMark: the 3-dot's data attribute, so each player's own menu button can be told apart (the
+  // player card reuses this row while Now Playing's stays mounted behind it).
+  const renderTransportControls = ({ playSize, playIconSize, playMargin, controlSize, secondarySize, withMenu = false, menuMark = 'data-np-menu-btn' }) => {
     const ringSize = playSize + 8;
     const ringRadius = ringSize / 2 - 2;
     const ringCircumference = 2 * Math.PI * ringRadius;
@@ -1064,7 +1121,7 @@ export default function App() {
         </button>
         <button
           className={cx("clickable play-pause-btn", { 'play-pause-btn--playing': isPlaying })}
-          style={{ width: playSize, height: playSize, color: 'var(--chrome-text)', margin: `0 ${playMargin}px`, position: 'relative' }}
+          style={{ width: playSize, height: playSize, color: 'var(--play-icon)', margin: `0 ${playMargin}px`, position: 'relative' }}
           onClick={(e) => { e.stopPropagation(); handlePlayPauseClick(e); }}
           onMouseDown={handlePlayPausePressStart}
           onMouseUp={handlePlayPausePressEnd}
@@ -1077,7 +1134,7 @@ export default function App() {
               <circle
                 cx={ringSize / 2} cy={ringSize / 2} r={ringRadius}
                 fill="none"
-                stroke="#00f2fe"
+                stroke="rgb(var(--art-rgb))"
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeDasharray={ringCircumference}
@@ -1102,7 +1159,7 @@ export default function App() {
         {/* The track menu, last. Only Now Playing's own rows ask for it: the pill, the Chill bar and
             the mini player add theirs outside this row. */}
         {withMenu && currentTrack && (
-          <button className="player-control-button clickable" title="More" aria-label="More" data-np-menu-btn style={{ color: 'var(--chrome-text)' }} onClick={openCurrentTrackMenu}>
+          <button className="player-control-button clickable" title="More" aria-label="More" {...{ [menuMark]: true }} style={{ color: 'var(--chrome-text)' }} onClick={openCurrentTrackMenu}>
             <MoreVertical size={secondarySize} />
           </button>
         )}
@@ -1114,7 +1171,11 @@ export default function App() {
     if (view !== 'now_playing') setPreviousView(view);
     setView('now_playing');
   };
-  const collapseNowPlaying = () => setView(previousView);
+  // Closing the song keeps what was beside it (npBeside / isLyricsOpen): the floating player
+  // reopens it the same way.
+  const collapseNowPlaying = () => { setView(previousView); };
+  const expandNowPlayingRef = useRef(expandNowPlaying);
+  expandNowPlayingRef.current = expandNowPlaying;
 
   React.useEffect(() => {
     if ('mediaSession' in navigator) {
@@ -1225,10 +1286,76 @@ export default function App() {
   }, []);
 
   const isNowPlayingOpen = view === 'now_playing';
+  // ── The split's motion: one stage, one move each ───────────────────────────────────────────
+  // The song's lit glass (veil + lights) always covers the whole card; the right half is a glass
+  // sheet holding the lyrics or the page. The song column is positioned by ONE property (its
+  // width) and only animates while Now Playing stays open: on the open and close frames it is
+  // latched, so the song rises out of / sinks into the floating player without sliding sideways.
+  const npHalf = isLyricsOpen || npSplit;
+  const npLookRef = useRef({ half: npHalf, lyrics: isLyricsOpen && !npSplit });
+  if (isNowPlayingOpen) npLookRef.current = { half: npHalf, lyrics: isLyricsOpen && !npSplit };
+  const npLook = npLookRef.current;
+  // True only once Now Playing was already open on the previous render: transitions run then.
+  const npOpenBeforeRef = useRef(false);
+  const npSettled = isNowPlayingOpen && npOpenBeforeRef.current;
+  React.useEffect(() => { npOpenBeforeRef.current = isNowPlayingOpen; });
+  const libraryHeaderRef = useRef(null);
+  const splitAnimsRef = useRef([]);
+  const splitPhase = npSplit ? 'sheet' : splitPageLeaving ? 'leaving' : 'page';
+  const splitPhaseRef = useRef({ phase: splitPhase, kind: null });
+  React.useLayoutEffect(() => {
+    const prev = splitPhaseRef.current;
+    const kind = npSplitLibrary ? 'library' : null;
+    splitPhaseRef.current = { phase: splitPhase, kind: kind || prev.kind };
+    if (prev.phase === splitPhase) return undefined;
+    splitAnimsRef.current.forEach((a) => a.cancel());
+    splitAnimsRef.current = [];
+    // Out of the sheet while the song stays (to its lyrics): fade out in place first.
+    if (prev.phase === 'sheet' && splitPhase === 'page' && isNowPlayingOpen && prev.kind) {
+      setSplitPageLeaving(prev.kind);
+      return undefined;
+    }
+    if (splitPhase !== 'leaving' && splitPageLeaving) setSplitPageLeaving(null);
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const els = [libraryHeaderRef.current, scrollContainerRef.current].filter(Boolean);
+    if (reduce || !els.length || typeof els[0].animate !== 'function') return undefined;
+    const glide = 'cubic-bezier(0.32, 0.72, 0, 1)';
+    let frames = null; let timing = null;
+    if (splitPhase === 'sheet') {
+      // Into the sheet: the list settles in from just right of it as the song rises.
+      frames = [{ opacity: 0, transform: 'translateX(28px)' }, { opacity: 1, transform: 'none' }];
+      timing = { duration: 480, delay: 70, easing: glide, fill: 'backwards' };
+    } else if (splitPhase === 'leaving') {
+      frames = [{ opacity: 1 }, { opacity: 0, transform: 'translateY(6px)' }];
+      timing = { duration: SPLIT_PAGE_LEAVE_MS - 20, easing: 'ease-in', fill: 'forwards' };
+    } else if (prev.phase === 'sheet' && !isNowPlayingOpen && view === 'library') {
+      // The song sank into the floating player, back to the Library: it opens out from the right
+      // half. (Back to Home or an artist page, that page just appears as the stage fades.)
+      frames = [{ opacity: 0.55, transform: 'translateX(48%)' }, { opacity: 1, transform: 'none' }];
+      timing = { duration: 560, easing: glide };
+    }
+    if (frames) splitAnimsRef.current = els.map((el) => el.animate(frames, timing));
+    if (splitPhase === 'leaving') {
+      const t = setTimeout(() => setSplitPageLeaving(null), SPLIT_PAGE_LEAVE_MS);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [splitPhase]); // eslint-disable-line react-hooks/exhaustive-deps -- runs on a phase change only; the rest is read as it is then
   // Chill mode: full-width Now Playing as a turntable (ChillScene.jsx). The
-  // preference outlives leaving Now Playing and a narrow/mini excursion, but it
-  // only takes effect where it can render: Now Playing, full width, a track.
+  // preference outlives a narrow/mini excursion (not leaving Now Playing: see below),
+  // and only takes effect where it can render: Now Playing, full width, a track.
   const [isChillMode, setIsChillMode] = useState(false);
+  // Leaving Now Playing for another page while in Chill mode is leaving Chill, exactly like its
+  // Exit button: the preference turns off, so the floating player then opens the normal Now Playing
+  // (it used to bring Chill straight back). Any way out counts — the Home / Library / Chill tabs,
+  // ⌘F, an artist link. A narrow or mini excursion is not leaving (the view stays Now Playing), so
+  // Chill still comes back when the window is wide again; Escape / Exit keep you on the song.
+  const viewBeforeRef = useRef(view);
+  React.useEffect(() => {
+    const was = viewBeforeRef.current;
+    viewBeforeRef.current = view;
+    if (was === 'now_playing' && view !== 'now_playing') setIsChillMode(false);
+  }, [view]);
   // Which Chill scene (turntable / hammock), remembered between launches, and the
   // picker popup that changes it.
   const [chillSceneId, setChillSceneId] = useState(loadChillSceneId);
@@ -1238,7 +1365,130 @@ export default function App() {
   const chooseChillScene = (id) => { setChillSceneId(id); saveChillSceneId(id); setChillPickerOpen(false); };
   const chillSceneIdRef = useRef(chillSceneId);
   chillSceneIdRef.current = chillSceneId;
+
+  // ── The session: the app comes back as it was when it quit ────────────────────────────────
+  // (electron/session.mjs has the format.) Saved every couple of seconds when something changed,
+  // and synchronously as the window closes; restored right after the library, above. Not kept:
+  // the search text, open menus and dialogs, and the selection, which are of the moment.
+  const sessionLiveRef = useRef(null);
+  sessionLiveRef.current = { currentTrack, isShuffle, repeatMode, view, previousView, homeDetailItem, homeDetailOrigin, queueSource, isChillMode, isLyricsOpen, npBeside, playbackHistory, library };
+  const buildSession = React.useCallback(() => {
+    const st = sessionLiveRef.current;
+    const pickItem = (item) => (item ? { type: item.type, key: item.key, ...(item.label != null ? { label: item.label } : {}) } : null);
+    const mixItem = st.homeDetailItem?.type === 'mix' ? st.homeDetailItem : st.queueSource?.item?.type === 'mix' ? st.queueSource.item : null;
+    const mixSeed = mixItem ? st.library.find(t => t.filePath === mixItem.key) : null;
+    const mixTracks = getCachedMix(mixSeed);
+    const t = audioRef.current?.currentTime;
+    return {
+      currentTrackPath: st.currentTrack?.filePath ?? null,
+      currentTime: Number.isFinite(t) ? Math.round(t * 10) / 10 : 0,
+      isShuffle: st.isShuffle,
+      repeatMode: st.repeatMode,
+      view: st.view,
+      previousView: st.previousView,
+      homeDetailItem: pickItem(st.homeDetailItem),
+      homeDetailOrigin: st.homeDetailOrigin ?? null,
+      queueSource: st.queueSource ? { label: st.queueSource.label, item: pickItem(st.queueSource.item) } : null,
+      isChillMode: st.isChillMode,
+      isLyricsOpen: st.isLyricsOpen,
+      npBeside: st.npBeside,
+      playNext: [...forcedNextQueueRef.current],
+      history: st.playbackHistory.map(h => h.filePath),
+      mix: mixSeed && mixTracks ? { seedPath: mixSeed.filePath, paths: mixTracks.map(m => m.filePath) } : null,
+      scroll: { ...scrollPositionsRef.current },
+      detailScrolls: { ...homeDetailScrollsRef.current },
+      libraryScroll: libraryScrollOffsetRef.current || 0,
+    };
+  }, []);
+  const buildSessionRef = useRef(buildSession);
+  buildSessionRef.current = buildSession;
+  React.useEffect(() => {
+    let last = '';
+    const save = () => {
+      if (!sessionReadyRef.current) return;
+      const json = JSON.stringify(buildSession());
+      if (json === last) return;
+      last = json;
+      window.electronAPI?.saveSession?.(JSON.parse(json));
+    };
+    const timer = setInterval(save, 2000);
+    const onUnload = () => {
+      if (!sessionReadyRef.current) return;
+      window.electronAPI?.saveSessionSync?.(buildSession());
+      // The library list's own save waits for half a second of quiet: one change just before the
+      // window closes would otherwise be lost.
+      const st = sessionLiveRef.current;
+      window.electronAPI?.saveLibraryStateSync?.({ trackPaths: st.library.map(t => t.filePath), currentTrackPath: st.currentTrack?.filePath ?? null, currentTime: audioRef.current?.currentTime ?? 0 });
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => { clearInterval(timer); window.removeEventListener('beforeunload', onUnload); };
+  }, [buildSession]);
+  // Puts a saved session back (called once, right after the library is restored). A launch
+  // that opened files from Finder plays those, so only the controls come back then.
+  applySessionRef.current = (ss, tracks, { hasTrack, openedFiles }) => {
+    setIsShuffle(!!ss.isShuffle);
+    setRepeatMode(ss.repeatMode || 'off');
+    if (openedFiles) return;
+    const byPath = new Map(tracks.map(t => [t.filePath, t]));
+    forcedNextQueueRef.current = (ss.playNext || []).filter(p => byPath.has(p));
+    setPlaybackHistory((ss.history || []).map(p => byPath.get(p)).filter(Boolean));
+    if (ss.mix) {
+      const seed = byPath.get(ss.mix.seedPath);
+      if (seed) seedMixCache(seed, (ss.mix.paths || []).map(p => byPath.get(p)).filter(Boolean));
+    }
+    Object.assign(scrollPositionsRef.current, ss.scroll || {});
+    Object.assign(homeDetailScrollsRef.current, ss.detailScrolls || {});
+    libraryScrollOffsetRef.current = ss.libraryScroll || 0;
+    const nextView = ss.view === 'now_playing' && !hasTrack ? (ss.previousView || 'library') : (ss.view || 'library');
+    setPreviousView(ss.previousView || 'library');
+    setHomeDetailItem(ss.homeDetailItem || null);
+    setHomeDetailOrigin(ss.homeDetailOrigin || null);
+    setQueueSource(hasTrack ? ss.queueSource || null : null);
+    setIsLyricsOpen(!!ss.isLyricsOpen);
+    setNpBeside(!!ss.npBeside);
+    setIsChillMode(!!ss.isChillMode && nextView === 'now_playing' && hasTrack);
+    setView(nextView);
+    restoreScrollAfterSession(nextView, ss.homeDetailItem || null);
+  };
+  // The list under the restored page is laid out a frame or two later (and the Library's rows by
+  // the virtualizer): put its scroll back once it is tall enough to take it.
+  const restoreScrollAfterSession = (nextView, item) => {
+    const target = nextView === 'home' && item
+      ? scrollPositionsRef.current[`home_detail:${item.type}:${item.key}`] ?? 0
+      : nextView === 'library' ? libraryScrollOffsetRef.current || scrollPositionsRef.current.library || 0
+      : scrollPositionsRef.current[nextView] ?? 0;
+    if (!target) return;
+    const started = performance.now();
+    const tick = () => {
+      const el = scrollContainerRef.current;
+      if (el) {
+        if (nextView === 'library') rowVirtualizerRef.current?.scrollToOffset(target);
+        el.scrollTop = target;
+        if (Math.abs(el.scrollTop - target) < 2) return;
+      }
+      if (performance.now() - started < 2000) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(tick));
+  };
   const chillActive = isChillMode && isNowPlayingOpen && !isNarrowLayout && !isMiniLayout && !!currentTrack;
+
+  // Listen mode: Escape goes back to browsing — the page Now Playing was opened from (the Library
+  // or a detail page), where the player card is. Everything else that Escape closes comes first:
+  // each of them has its own Escape handler, so this one steps aside while any of them is open
+  // (read at the moment of the key press, before their own handlers have closed them).
+  const escapeToBrowseRef = useRef(null);
+  escapeToBrowseRef.current = () => {
+    if (view !== 'now_playing' || isMiniLayout || chillActive || chillPickerOpen || searchOpen || trackMenu || pendingNewTracks) return;
+    collapseNowPlaying();
+  };
+  // Capture phase, so this reads the state as it was at the key press: React re-renders between
+  // listeners (a microtask runs after each one), so a bubble-phase listener that ran after the
+  // track menu's own Escape handler saw the menu already closed and left Now Playing too.
+  React.useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') escapeToBrowseRef.current?.(); };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
   // One idle clock for all of Chill mode's chrome: the bar (ChillScene), the
   // title strip's buttons below, and the traffic lights (via main). Held up
   // while something is open over it.
@@ -1282,19 +1532,34 @@ export default function App() {
     if (trackMenu) { setTrackMenu(null); return; }
     if (currentTrack) setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' });
   };
-  // The right pill's two buttons. Lyrics: any page, while the song has lyrics (or the panel is
-  // already open); off Now Playing a click opens Now Playing with the lyrics showing. Chill mode:
-  // not at narrow widths, where it doesn't exist.
-  const navLyricsVisible = !!currentTrack && !!(currentTrack.lyrics || (isNowPlayingOpen && isLyricsOpen));
-  const navChillVisible = !!currentTrack && !isNarrowLayout;
-  const navRightVisible = !chillActive && !isMiniLayout && (navLyricsVisible || navChillVisible);
-  const navLyricsActive = isNowPlayingOpen && isLyricsOpen;
-  const onNavLyrics = () => {
-    if (isNowPlayingOpen) { setIsLyricsOpen((v) => !v); return; }
+  // The Now Playing tab (in the centred pill, after Library), whenever there is a song: it opens the
+  // song as it was last left (like the floating player) and is lit while the song is open, Chill
+  // included, where clicking it does nothing.
+  const navNowPlayingVisible = !!currentTrack;
+  // Now Playing's own pill at the top right (NowPlayingPill.jsx), only while the song is open and
+  // never in Chill (which has its own buttons there): Lyrics or the Library beside the song, one at
+  // a time (the lit one turns it off), then Chill. Lyrics only while the song has lyrics (or they
+  // are showing); the Library only where the window can split (never at phone width, where the
+  // top bar's Library is the Library).
+  const npPillVisible = isNowPlayingOpen && !chillActive && !isMiniLayout && !!currentTrack;
+  const sideLyricsVisible = !!currentTrack && !!(currentTrack.lyrics || isLyricsOpen);
+  const sideLibraryVisible = !!currentTrack && splitPossible;
+  const toggleSideLyrics = () => { setNpBeside(false); setIsLyricsOpen((v) => !v); };
+  // Chill needs a wide window: at phone width it fills the screen first and then opens Chill
+  // (exactly File > Chill Mode, through main.js).
+  const enterChill = () => {
+    if (chillActive) return;
+    if (isNarrowLayout) { window.electronAPI?.enterChillMode?.(); return; }
     expandNowPlaying();
-    setIsLyricsOpen(true);
+    setIsChillMode(true);
   };
-  const showLibrary = view === 'library' || (isNowPlayingOpen && previousView === 'library');
+  const toggleSideLibrary = () => { setIsLyricsOpen(false); setNpBeside(!npSplitLibrary); };
+  // The top bar's Library: always the full Library (closing the song if it is open).
+  const onNavLibrary = () => { setView('library'); };
+  // The floating player opens the song as it was last left: the lyrics, the Library or nothing
+  // beside it (npBeside / isLyricsOpen are kept, and saved with the session).
+  const openFromFloatingPlayer = () => { expandNowPlaying(); };
+  const showLibrary = view === 'library' || (isNowPlayingOpen && previousView === 'library') || sheetLibrary;
   showLibraryRef.current = showLibrary;
 
   const lyricsIsRTL = isRTL(currentTrack?.lyrics);
@@ -1345,6 +1610,8 @@ export default function App() {
   useLayoutEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
+    // Now Playing: the page underneath keeps its place (it shows beside the song in the split)
+    if (view === 'now_playing') return;
     if (view === 'home' && homeDetailItem) {
       const detailKey = `home_detail:${homeDetailItem.type}:${homeDetailItem.key}`;
       el.scrollTop = scrollPositionsRef.current[detailKey] ?? 0;
@@ -1375,66 +1642,82 @@ export default function App() {
     playRecordedRef.current = false;
   }, [currentTrack?.filePath]);
 
-  // ── Search (SearchPanel.jsx) ───────────────────────────────────────────────
-  // A floating panel over whatever page you're on, opened from the title bar's
-  // search button or ⌘F. The text it holds also LIVE-FILTERS the page behind it
-  // where that page is a list:
-  //   Library          → the Library list (visibleTracks above)
-  //   a Details page   → that page's own tracks (HomeDetailView)
-  //   Home / Now Playing → nothing to filter; the panel's results are the thing
-  // The panel itself searches the whole library (grouped Artists / Albums /
-  // Songs), except on a Details page where it starts scoped to that page.
-  const searchScope = view === 'library' ? 'library'
-    : view === 'home' ? (homeDetailItem ? 'details' : 'home')
-    : null;
-  // The page's identity for search purposes. Search and its text never survive
-  // a change of page: a filter must not linger somewhere its panel isn't — and
-  // choosing an artist/album result navigates, which closes the panel for free.
-  const searchPageKey = view === 'now_playing'
-    ? 'now_playing'
-    : `${view}|${homeDetailItem ? `${homeDetailItem.type}:${homeDetailItem.key}` : ''}`;
+  // ── Search: the Library's own field (TrackListHeader.jsx) ──────────────────────────────────
+  // It lives in the Library's column header (its 🔍 opens it, and the Title label becomes the
+  // field); the list itself filters as you type (visibleTracks). Opened by the 🔍, by ⌘F from any
+  // page (which goes to the Library first) or by simply typing a letter on the Library. Esc clears
+  // the text, a second Esc closes it. It only exists on the Library (alone or beside the song), and
+  // leaving the Library clears it.
+  const searchInputRef = useRef(null);
+  const pendingSearchRef = useRef(null); // text to open with once the Library is on screen (⌘F / typing from elsewhere)
+  const focusSearchField = () => requestAnimationFrame(() => searchInputRef.current?.focus());
+  // The page's identity for search: anything but the Library closes and clears it.
+  const searchPageKey = pageView === 'library' ? 'library' : `other:${pageView}`;
   React.useEffect(() => {
+    const pending = pendingSearchRef.current;
+    pendingSearchRef.current = null;
+    if (pending !== null && searchPageKey === 'library') {
+      setSearchQuery(pending);
+      setSearchOpen(true);
+      focusSearchField();
+      return;
+    }
     setSearchOpen(false);
     setSearchQuery('');
   }, [searchPageKey]);
 
-  // The current Details page's (unfiltered) tracks, reported by HomeDetailView
-  // so the panel can scope to them.
-  const [detailPageTracks, setDetailPageTracks] = useState(null);
-
-  const openSearch = React.useCallback(() => {
+  const openSearch = React.useCallback((initial = '') => {
     if (isMiniLayout) return;
-    if (searchOpen) { document.querySelector('.search-panel-input')?.focus(); return; }
-    // The text is NOT cleared here: after an outside-click dismissal on
-    // Library/Details it is still filtering the list, and reopening shows it.
+    if (pageView !== 'library') {
+      // ⌘F from Home, a detail page or Now Playing: to the Library, with the field open
+      pendingSearchRef.current = initial;
+      setView('library');
+      return;
+    }
     setSearchOpen(true);
-  }, [isMiniLayout, searchOpen]);
-  const closeSearch = React.useCallback(() => { setSearchOpen(false); setSearchQuery(''); }, []);
-  // A click outside the panel: close it, but on a page whose list the text is
-  // filtering (Library / Details) keep the filter until the page changes or
-  // the user clears it. Home and Now Playing have nothing filtered, so the
-  // text goes with the panel.
-  const dismissSearch = React.useCallback(() => {
+    if (initial) setSearchQuery((q) => q + initial);
+    focusSearchField();
+  }, [isMiniLayout, pageView]);
+  const clearSearch = React.useCallback(() => { setSearchQuery(''); focusSearchField(); }, []);
+  const closeSearch = React.useCallback(() => {
     setSearchOpen(false);
-    if (searchScope !== 'library' && searchScope !== 'details') setSearchQuery('');
-  }, [searchScope]);
-  const searchFilterActive = !searchOpen && searchQuery.trim() !== '' && (searchScope === 'library' || searchScope === 'details');
+    setSearchQuery('');
+    searchInputRef.current?.blur();
+  }, []);
 
-  // Artist/album results (and anything else that opens a Details page from
-  // search): opens it, and sets the origin so its back button returns here —
-  // Library or Now Playing; from Home itself the plain Home back button does.
-  const openDetailFromSearch = React.useCallback((item) => {
-    setHomeDetailOrigin(view === 'home' ? null : view);
-    setView('home');
-    setHomeDetailItem(item);
-  }, [view]);
-
-  // ⌘F (Edit menu, electron/main.js) opens search.
+  // ⌘F (Edit menu, electron/main.js) opens it.
   const openSearchRef = useRef(openSearch);
   openSearchRef.current = openSearch;
   React.useEffect(() => {
     const unsub = window.electronAPI?.onFind?.(() => openSearchRef.current());
     return unsub;
+  }, []);
+
+  // Esc: clears the text, then closes the field. Typing a letter or digit on the Library (not in a
+  // text field, no modifier, nothing else open) opens the field with it. Space stays play/pause
+  // (a letter-or-digit rule never includes it), and Backspace/Delete stay the list's own keys.
+  const searchKeysRef = useRef(null);
+  searchKeysRef.current = { searchOpen, searchQuery, openSearch, clearSearch, closeSearch,
+    blocked: isMiniLayout || chillActive || !!trackMenu || !!pendingNewTracks || pageView !== 'library' || library.length === 0 };
+  React.useEffect(() => {
+    const onKey = (e) => {
+      const k = searchKeysRef.current;
+      if (!k) return;
+      if (e.key === 'Escape') {
+        if (!k.searchOpen || k.blocked) return;
+        e.preventDefault();
+        if (k.searchQuery) k.clearSearch(); else k.closeSearch();
+        return;
+      }
+      if (k.blocked || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      if (e.key.length !== 1 || !/[\p{L}\p{N}]/u.test(e.key)) return;
+      const a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return;
+      e.preventDefault();
+      k.openSearch(e.key);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   // File > Add Music and the whole Controls menu (electron/appMenu.mjs). Each
@@ -1534,6 +1817,31 @@ export default function App() {
     };
   }, [isMiniLayout]);
 
+  // Strip mode: tell the strip window what is playing (the time is sent as the <audio> reports
+  // it, a few times a second), and carry out what it asks for.
+  React.useEffect(() => {
+    if (!isStripMode) return;
+    window.electronAPI?.sendStripState?.({
+      track: currentTrack ? { title: currentTrack.title, artist: currentTrack.artist, thumb: currentTrack.thumb, filePath: currentTrack.filePath } : null,
+      isPlaying, currentTime, duration, artworkRgb, isShuffle, repeatMode,
+    });
+  }, [isStripMode, currentTrack, isPlaying, currentTime, duration, artworkRgb, isShuffle, repeatMode]);
+  const stripCommandsRef = useRef({});
+  stripCommandsRef.current = {
+    play: () => togglePlay(),
+    next: () => playNext(false),
+    prev: () => playPrev(),
+    shuffle: () => setIsShuffle((v) => !v),
+    repeat: () => toggleRepeat(),
+    seek: (t) => {
+      const a = audioRef.current;
+      if (!a || !Number.isFinite(t)) return;
+      a.currentTime = t;
+      setCurrentTime(t);
+    },
+  };
+  React.useEffect(() => window.electronAPI?.onStripCommand?.(({ cmd, value }) => stripCommandsRef.current[cmd]?.(value)), []);
+
   // Automated-test hook — only exists when the page is loaded with ?test=1
   // (electron --smoke does this; the normal app never passes the query).
   React.useEffect(() => {
@@ -1559,6 +1867,10 @@ export default function App() {
       // Mix UI state (loading briefly, then ready/empty) without a real
       // network call. `tracks: []` exercises the empty state.
       seedMixResult: (seedTrack, tracks) => __setMixCacheForTest(seedTrack, tracks),
+      // test hook: the session as it would be saved right now
+      getSession: () => buildSessionRef.current?.(),
+      // test hook: open Now Playing from the current page, beside it (the split) or alone
+      openNowPlaying: (beside = false) => { setIsLyricsOpen(false); setNpBeside(!!beside); expandNowPlayingRef.current?.(); },
     };
     return () => { delete window.__sonusTest; };
   }, []);
@@ -1602,7 +1914,7 @@ export default function App() {
           onSeekMouseUp={handleSeekMouseUp}
           formatTime={formatTime}
           marqueeFadeMask={marqueeFadeMask}
-          renderTransport={() => renderTransportControls({ playSize: 40, playIconSize: 20, playMargin: 8, controlSize: 22, secondarySize: 18 })}
+          renderTransport={() => renderTransportControls({ playSize: 40, playIconSize: 17, playMargin: 8, controlSize: 22, secondarySize: 18 })}
           onTogglePlay={togglePlay}
           onExit={() => setIsChillMode(false)}
           chromeVisible={chillChromeVisible}
@@ -1620,6 +1932,14 @@ export default function App() {
           ancestor; and not display:none, which would collapse the scroll
           containers and lose Library/detail scroll positions. */}
       <div className="glass-panel" inert={isMiniLayout} style={{ flex: 1, borderRadius: '0 0 16px 16px', borderTop: 'none', paddingTop: detailOpen ? 0 : TITLE_STRIP_HEIGHT, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', opacity: isMiniLayout ? 0 : undefined }}>
+        {/* Behind every page (Library, Home, detail pages): the song's liquid colour, calm (dimmer,
+            slower, at most 15fps, still while anything scrolls), so the background is the same
+            colours as Now Playing's and opening the song only brightens and quickens it. z-index -1
+            inside the card's own stacking context (its backdrop-filter makes one): above the card's
+            glass, below the page. It stops drawing while Now Playing (which has its own) covers it. */}
+        <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: -1, pointerEvents: 'none' }}>
+          <LiquidCover calm src={currentTrack?.thumb} isPlaying={isPlaying} active={!isNowPlayingOpen && !isMiniLayout && !isStripMode} />
+        </div>
 
         {/* Column header, deliberately a SIBLING above .scrollable rather than
             sticky inside it — rows then physically cannot pass behind the
@@ -1633,7 +1953,9 @@ export default function App() {
           // whether or not the list is long enough to scroll — otherwise a short
           // library would misalign in the opposite direction. The smoke suite
           // asserts Time sits exactly over the duration column.
-          <div style={{ flexShrink: 0, padding: isNarrowLayout ? '8px 22px 6px 16px' : '16px 38px 6px 32px', visibility: isNowPlayingOpen ? 'hidden' : 'visible' }}>
+          // In the split it is the top of the right-hand glass sheet (drawn by the Now Playing
+          // layer underneath; SPLIT_SHEET_* in splitView.js), lifted above that layer.
+          <div ref={libraryHeaderRef} data-split-page={pageInSheet ? 'sheet' : undefined} style={{ flexShrink: 0, padding: pageInSheet ? '14px 26px 6px 20px' : isNarrowLayout ? '8px 22px 6px 16px' : '16px 38px 6px 32px', visibility: isNowPlayingOpen && !pageInSheet ? 'hidden' : 'visible', ...(pageInSheet ? { position: 'relative', zIndex: 6, marginTop: SPLIT_SHEET_TOP, marginLeft: `calc(50% + ${SPLIT_SHEET_MID}px)`, marginRight: SPLIT_SHEET_EDGE, borderBottom: '0.5px solid rgba(255,255,255,0.1)' } : null) }}>
             <TrackListHeader
               sort={librarySortApi.sort}
               onCycleColumn={librarySortApi.cycleColumn}
@@ -1641,6 +1963,10 @@ export default function App() {
               onDensityChange={setDensity}
               showAlbum={false}
               extraColumns={visibleLibraryExtraColumns}
+              search={{
+                open: searchOpen, query: searchQuery, count: visibleTracks.length, total: library.length, inputRef: searchInputRef,
+                onOpen: () => openSearch(), onQueryChange: setSearchQuery, onClear: clearSearch, onClose: closeSearch,
+              }}
             />
           </div>
         )}
@@ -1649,11 +1975,12 @@ export default function App() {
           ref={scrollContainerRef}
           onScroll={(e) => {
             if (showLibrary) libraryScrollOffsetRef.current = e.currentTarget.scrollTop;
-            if (view === 'home' && homeDetailItem) {
+            // (pageView, not view: in the split the page beside the song keeps its own position)
+            if (pageView === 'home' && homeDetailItem) {
               const detailKey = `home_detail:${homeDetailItem.type}:${homeDetailItem.key}`;
               scrollPositionsRef.current[detailKey] = e.currentTarget.scrollTop;
             } else {
-              scrollPositionsRef.current[view] = e.currentTarget.scrollTop;
+              scrollPositionsRef.current[pageView] = e.currentTarget.scrollTop;
             }
           }}
           style={{
@@ -1724,6 +2051,15 @@ export default function App() {
               : (view === 'home' && homeDetailItem)
                 ? '0'
                 : (isNarrowLayout ? `16px 16px ${16 + NARROW_PILL_CLEARANCE}px` : `32px 32px ${32 + PLAYER_PILL_CLEARANCE}px`),
+            // The split: the page fills the right-hand glass sheet beside the song (the sheet's
+            // glass is drawn by the Now Playing layer underneath; this sits above that layer).
+            ...(pageInSheet ? {
+              position: 'relative', zIndex: 6,
+              marginLeft: `calc(50% + ${SPLIT_SHEET_MID}px)`, marginRight: SPLIT_SHEET_EDGE, marginBottom: SPLIT_SHEET_EDGE,
+              marginTop: sheetLibrary ? 0 : SPLIT_SHEET_TOP,
+              borderRadius: sheetLibrary ? `0 0 ${SPLIT_SHEET_RADIUS}px ${SPLIT_SHEET_RADIUS}px` : SPLIT_SHEET_RADIUS,
+              padding: sheetLibrary ? '0 20px' : 0,
+            } : null),
             overflowY: 'auto',
             // Reserve the scrollbar gutter on Library so the header above (which
             // is outside this scroller) can compensate with a fixed 6px rather
@@ -1735,7 +2071,8 @@ export default function App() {
             // frame 1, just at low opacity - so there's no gap to avoid. Keeping Library
             // rendered any longer than this just lets it bleed through the panel's translucent
             // tint for the rest of the fade, with nothing gained.
-            visibility: isNowPlayingOpen ? 'hidden' : 'visible',
+            visibility: isNowPlayingOpen && !pageInSheet ? 'hidden' : 'visible',
+            pointerEvents: splitPageLeaving ? 'none' : undefined,
           }}
         >
 
@@ -1758,11 +2095,12 @@ export default function App() {
                 <TrackList
                   tracks={visibleTracks}
                   emptyState={
-                    <div style={{ color: 'var(--text-secondary)', textAlign: 'center', marginTop: 80 }}>
-                      <Search size={48} style={{ opacity: 0.5, marginBottom: 16, margin: '0 auto' }} />
-                      <p style={{ marginBottom: 16, fontSize: 16 }}>No tracks match "{searchQuery.trim()}".</p>
+                    <div className="list-search-empty" data-list-search-empty>
+                      No songs match “<b>{searchQuery.trim()}</b>”
+                      <div><button className="clickable" onClick={clearSearch}>Clear search</button></div>
                     </div>
                   }
+                  highlight={searchWordList.length ? searchWordList : null}
                   currentTrack={currentTrack}
                   isPlaying={isPlaying}
                   density={density}
@@ -1778,7 +2116,7 @@ export default function App() {
                   virtualizerRef={rowVirtualizerRef}
                   showAlbum={false}
                   extraColumns={visibleLibraryExtraColumns}
-                  bottomPadding={isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE}
+                  bottomPadding={isNarrowLayout ? NARROW_PILL_CLEARANCE : sheetLibrary ? 24 : PLAYER_PILL_CLEARANCE}
                 />
               )}
             </div>
@@ -1815,13 +2153,10 @@ export default function App() {
               savedScrollTop={homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] ?? 0}
               onScrollChange={(pos) => { homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] = pos; }}
               bottomClearance={isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE}
-              searchQuery={searchScope === 'details' ? searchQuery : ''}
-              onTracksChange={setDetailPageTracks}
             />
           )}
 
         </div>
-
 
       {/* Now Playing: always mounted, fades + scales in over the current page / back out.
             The outer wrapper owns position/pointer-events/no-drag and never itself carries
@@ -1840,8 +2175,9 @@ export default function App() {
             through position-dependently - the panel's own translucency genuinely doesn't matter
             here since the whole thing (panel + content) fades as one unit. */}
         <div
+          data-np-layer={isNowPlayingOpen ? (npSplit ? 'split' : 'open') : 'closed'}
           style={{
-            position: 'absolute', top: 0, left: 0, right: 0,
+            position: 'absolute', top: 0, left: 0,
             // Full height in both modes: both pills (PlayerPill.jsx full-width,
             // PlayerPillNarrow.jsx narrow) are position:fixed overlays that
             // float above this area entirely on their own — their z-index (6)
@@ -1852,6 +2188,9 @@ export default function App() {
             // visible over the Lyrics tab (its own shouldShow folds in
             // isLyricsOpen), floating above this same box.
             bottom: 0,
+            // The whole card in every song view, the split included: its lit glass is ONE stage
+            // behind both halves (the page beside the song is lifted above it, into the sheet).
+            right: 0,
             pointerEvents: isNowPlayingOpen ? 'auto' : 'none',
             zIndex: 5,
             clipPath: 'inset(0 0 0 0 round 0 0 16px 16px)',
@@ -1860,28 +2199,32 @@ export default function App() {
           <div
             style={{
               position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              // The stage only fades; the song rises out of the floating player (the wrapper
+              // inside the no-drag box below carries that transform).
               opacity: isNowPlayingOpen ? 1 : 0,
-              transform: isNowPlayingOpen ? 'scale(1)' : 'scale(0.96)',
-              transformOrigin: 'bottom center',
-              transition: 'opacity 0.28s cubic-bezier(0.32, 0.72, 0, 1), transform 0.28s cubic-bezier(0.32, 0.72, 0, 1)',
-              willChange: 'opacity, transform',
+              transition: 'opacity 0.32s cubic-bezier(0.32, 0.72, 0, 1)',
+              willChange: 'opacity',
             }}
           >
-            {/* Chill mode's photo is opaque and brings its own light, so neither
-                the glass blur nor the moving lights are mounted under it. */}
-            {!chillActive && (
-              <>
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)' }} />
-                {/* Ambient color wash — shared with the mini player, see AmbientFlares.jsx */}
-                <AmbientFlares artworkRgb={artworkRgb} isPlaying={isPlaying} />
-              </>
-            )}
+            {/* Liquid colour: the cover's own colours flowing (LiquidCover.jsx, shared with the
+                mini player). Opaque, darkened for the white text, so no glass veil under it. It
+                draws only while Now Playing is open (this layer stays mounted) and the music
+                plays. Chill mode's photo brings its own light, so it isn't mounted under it. */}
+            {!chillActive && <LiquidCover src={currentTrack?.thumb} isPlaying={isPlaying} active={isNowPlayingOpen && !isMiniLayout} />}
             {/* The interactive content starts BELOW the title strip and is the only
                 no-drag part: the glass/lights above sit under the strip, which must
                 stay draggable (a no-drag block over it, as the whole overlay used to
                 be once the card reached the window's top, made the window immovable).
                 Absolute children below are positioned from this box, not the card. */}
             <div style={{ position: 'absolute', top: TITLE_STRIP_HEIGHT, left: 0, right: 0, bottom: 0, WebkitAppRegion: 'no-drag' }}>
+            {/* The song rises out of the floating player and sinks back into it. Its own box:
+                an animated transform must not sit on the element that declares no-drag. */}
+            <div data-np-rise style={{
+              position: 'absolute', inset: 0,
+              transform: isNowPlayingOpen ? 'none' : 'translateY(36px) scale(0.95)',
+              transformOrigin: '50% 100%',
+              transition: 'transform 0.55s cubic-bezier(0.32, 0.72, 0, 1)',
+            }}>
             {isNarrowLayout ? (
               <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', padding: '16px 20px 24px', boxSizing: 'border-box' }}>
                 {/* No top bar of its own: back, Lyrics (which switches this view to the lyrics) and the track
@@ -1904,12 +2247,11 @@ export default function App() {
                      embedded transport controls already). Extra bottom padding on
                      this scroll container keeps the last lines of a long lyric from
                      sitting underneath that floating pill. */
-                  <div ref={lyricsScrollRef} className="np-narrow-lyrics" style={{ flex: 1, overflowY: 'auto', scrollbarGutter: 'stable both-edges', padding: `8px 4px ${NARROW_PILL_CLEARANCE}px` }}>
-                    {currentTrack.lyrics ? (
-                      <div style={{ fontSize: 15, lineHeight: 1.8, color: 'var(--chrome-text)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: 'center' }}>{currentTrack.lyrics}</div>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--chrome-text-dim)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
-                    )}
+                  <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                  {/* the reading spotlight, centred (LyricsSpotlight.jsx); `np-narrow-lyrics` is
+                      the scroller (the auto-hiding scrollbar and the smoke suite find it by it) */}
+                  <LyricsSpotlight narrow text={currentTrack.lyrics} rtl={lyricsIsRTL} scrollRef={lyricsScrollRef}
+                    scrollClassName="np-narrow-lyrics" scrollStyle={{ scrollbarGutter: 'stable both-edges' }} />
                   </div>
                 ) : (
                   /* Song tab */
@@ -1999,7 +2341,7 @@ export default function App() {
                     {/* Transport — reuses the same handlers/state as the desktop
                         player panel via renderTransportControls (see above). */}
                     <div style={{ flexShrink: 0 }}>
-                      {renderTransportControls({ playSize: 64, playIconSize: 30, playMargin: 18, controlSize: 26, secondarySize: 22, withMenu: true })}
+                      {renderTransportControls({ playSize: 58, playIconSize: 24, playMargin: 21, controlSize: 26, secondarySize: 22, withMenu: true })}
                     </div>
                   </div>
                 )}
@@ -2008,8 +2350,7 @@ export default function App() {
             <>
             {/* The back button and the track menu (3-dot) / Chill buttons live in
                 the title strip now (see the nav block near the top). */}
-            {/* The lyrics toggle lives in the title strip's right pill now (Mic2, next
-                to Chill mode). */}
+            {/* Lyrics and the Library are in Now Playing's own pill at the top right (NowPlayingPill). */}
             {/* "Playing from" breadcrumb — its own centered row below the
                 back-button/lyrics-icon row, above the artwork, same spot as
                 the narrow Song tab's. The space for it is reserved
@@ -2025,7 +2366,7 @@ export default function App() {
                 fills whatever's left under whatever paddingTop turns out to
                 be, automatically. */}
             {queueSource?.label && (
-              <div style={{ position: 'absolute', top: 50, left: '50%', transform: 'translateX(-50%)', zIndex: 2, fontSize: 12, color: 'rgba(255,255,255,0.45)', whiteSpace: 'nowrap' }}>
+              <div style={{ position: 'absolute', top: 50, left: npLook.half ? '25%' : '50%', transform: 'translateX(-50%)', transition: npSettled ? 'left 0.5s cubic-bezier(0.32, 0.72, 0, 1)' : 'none', zIndex: 2, fontSize: 12, color: 'rgba(255,255,255,0.45)', whiteSpace: 'nowrap' }}>
                 Playing from "{queueSource.item ? (
                   <span className="player-meta-link" onClick={(e) => { e.stopPropagation(); jumpToQueueSource(); }}>{queueSource.label}</span>
                 ) : queueSource.label}"
@@ -2059,9 +2400,12 @@ export default function App() {
                     position: 'relative',
                     display: 'flex', flexDirection: 'column',
                     alignItems: 'center',
-                    width: isLyricsOpen ? '50%' : '100%',
+                    // The left half beside the lyrics or a page (both: the sheet), centred alone.
+                    // Its width is the ONLY thing that moves the song, and only while Now Playing
+                    // stays open (npSettled): no sideways slide as it rises or sinks.
+                    width: npLook.half ? '50%' : '100%',
                     height: '100%',
-                    transition: 'width 0.4s cubic-bezier(0.32, 0.72, 0, 1)',
+                    transition: npSettled ? 'width 0.5s cubic-bezier(0.32, 0.72, 0, 1)' : 'none',
                     flexShrink: 0,
                     minWidth: 0,
                   }}>
@@ -2086,7 +2430,9 @@ export default function App() {
                         equally to both dimensions of the square. maxWidth is
                         a taste ceiling (don't let it get cartoonishly large
                         on an ultrawide monitor), not a layout requirement. */}
-                    <div style={{ flex: 1, minHeight: 0, minWidth: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 32px', containerType: 'size' }}>
+                    {/* 72px each side (was 32): room for the side buttons beside the cover, which sit
+                        16px off its right edge whatever limits the cover's size. */}
+                    <div style={{ position: 'relative', flex: 1, minHeight: 0, minWidth: 0, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 72px', containerType: 'size' }}>
                       {/* Artwork wrapper. NOT keyed by track any more: remounting it removed the old cover at
                           once and faded the new one in from nothing (a blank artwork area on every skip);
                           ArtCrossfade crossfades the covers inside it instead. */}
@@ -2139,7 +2485,9 @@ export default function App() {
                         relying on the floating pill entirely — the pill hides
                         while Now Playing is open (PlayerPill.jsx), so this is
                         the only transport surface here now. */}
-                    <div style={{ width: 'min(100%, 640px)', flexShrink: 0, marginTop: 32, paddingBottom: 8 }}>
+                    <div style={{ width: 'min(100%, 640px)', flexShrink: 0, marginTop: 32, boxSizing: 'border-box',
+                      // beside the sheet, clear of the window's edge and of the sheet
+                      padding: npLook.half ? '0 40px 8px' : '0 0 8px', transition: npSettled ? 'padding 0.5s cubic-bezier(0.32, 0.72, 0, 1)' : 'none' }}>
                       <div style={{ textAlign: 'center', marginBottom: 22, position: 'relative', zIndex: 2 }}>
                         <div style={{ fontSize: 32, fontWeight: 800, marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--chrome-text)' }}>{currentTrack.title}</div>
                         <div style={{ fontSize: 18, color: 'var(--chrome-text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -2200,34 +2548,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      {renderTransportControls({ playSize: 96, playIconSize: 42, playMargin: 28, controlSize: 36, secondarySize: 28, withMenu: true })}
-                    </div>
-                  </div>
-                  {/* Lyrics panel — outer: transitions width */}
-                  <div style={{
-                    position: 'relative',
-                    width: isLyricsOpen ? '50%' : '0%',
-                    flexShrink: 0,
-                    transition: 'width 0.4s cubic-bezier(0.32, 0.72, 0, 1)',
-                  }}>
-                    {/* Inner: clips content, fades in, border on left */}
-                    <div style={{
-                      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                      overflow: 'hidden',
-                      opacity: isLyricsOpen ? 1 : 0,
-                      transition: 'opacity 0.35s ease 0.1s',
-                      borderLeft: '1px solid rgba(255,255,255,0.1)',
-                    }}>
-                      <div ref={lyricsScrollRef} style={{ height: '100%', overflowY: 'auto', padding: '24px 16px 24px 32px', boxSizing: 'border-box' }}>
-                        {currentTrack.lyrics ? (
-                          <>
-                            <div style={{ fontSize: 12, color: 'var(--chrome-text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16, direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>Lyrics</div>
-                            <div style={{ fontSize: 16, lineHeight: 1.85, color: 'var(--chrome-text)', whiteSpace: 'pre-wrap', direction: lyricsIsRTL ? 'rtl' : 'ltr', textAlign: lyricsIsRTL ? 'center' : 'left' }}>{currentTrack.lyrics}</div>
-                          </>
-                        ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--chrome-text-dim)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
-                        )}
-                      </div>
+                      {renderTransportControls({ playSize: 72, playIconSize: 30, playMargin: 40, controlSize: 36, secondarySize: 28, withMenu: true })}
                     </div>
                   </div>
                 </>
@@ -2236,6 +2557,39 @@ export default function App() {
             </>
             )}
             </div>
+            </div>
+            {/* The sheet: the right half's glass, on the same stage as the song. It holds the
+                lyrics, and in the split the page beside the song sits on it (lifted above this
+                layer, see the .scrollable). Lyrics <-> page only crossfades inside it; its frame
+                never moves between them, nor does the song. Hidden it waits just to the right. */}
+            {!isNarrowLayout && !chillActive && currentTrack && (
+              <div data-np-sheet={npLook.half ? 'shown' : 'hidden'} style={{
+                position: 'absolute', top: TITLE_STRIP_HEIGHT + SPLIT_SHEET_TOP, bottom: SPLIT_SHEET_EDGE, right: SPLIT_SHEET_EDGE, left: `calc(50% + ${SPLIT_SHEET_MID}px)`,
+                borderRadius: SPLIT_SHEET_RADIUS, overflow: 'hidden', WebkitAppRegion: 'no-drag',
+                // No backdrop-filter: the lights behind are already a blur, so a tinted pane
+                // reads as glass without a second half-window blur to repaint.
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.04))',
+                boxShadow: 'inset 0 0 0 0.5px rgba(255,255,255,0.22), inset 0 1px 0 rgba(255,255,255,0.16), 0 24px 60px rgba(0,0,0,0.22)',
+                opacity: npLook.half ? 1 : 0,
+                transform: npLook.half ? 'none' : 'translateX(40px)',
+                transition: npSettled ? 'opacity 0.4s ease, transform 0.55s cubic-bezier(0.32, 0.72, 0, 1)' : 'none',
+                pointerEvents: isNowPlayingOpen && npLook.half ? 'auto' : 'none',
+              }}>
+                <div data-np-lyrics={npLook.lyrics ? 'shown' : 'hidden'} style={{
+                  position: 'absolute', inset: 0,
+                  opacity: npLook.lyrics ? 1 : 0,
+                  transform: npLook.lyrics ? 'none' : 'translateY(8px)',
+                  transition: npSettled ? `opacity ${npLook.lyrics ? '0.3s ease-out' : '0.22s ease-in'}, transform 0.45s cubic-bezier(0.32, 0.72, 0, 1)` : 'none',
+                  pointerEvents: npLook.lyrics ? 'auto' : 'none',
+                }}>
+                  {currentTrack.lyrics ? (
+                    <LyricsSpotlight text={currentTrack.lyrics} rtl={lyricsIsRTL} scrollRef={lyricsScrollRef} />
+                  ) : (
+                    <div ref={lyricsScrollRef} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--chrome-text-dim)', fontSize: 14, fontStyle: 'italic' }}>No lyrics for this track.</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2249,11 +2603,11 @@ export default function App() {
           own `.chill-drag-strip` is rendered before all of this, as it always was. */}
       {/* Title-bar navigation, two glass pills (the traffic lights own the far left):
             - one centred pill: [back arrow, only where there is somewhere to go back to
-              (Now Playing, a detail page)] | Home | Library | Search | + Add. Search opens
-              the floating SearchPanel (also ⌘F);
-            - at the right, a small pill with Lyrics (any page, when the song has lyrics) and
-              Chill mode (wide windows). Chill mode itself shows its own Change-scene and Exit
-              buttons there instead. The track's 3-dot menu is the LAST button of each player
+              (Now Playing, a detail page)] | Home | Library | Chill | + Add. (Search is the
+              Library's own field, in its column header; ⌘F opens it from anywhere.) Chill is a
+              tab, lit in Chill mode, only at full width with a song;
+            - nothing at the right, except in Chill mode, which shows its own Change-scene and Exit
+              buttons there (Lyrics and the Library are the side buttons beside Now Playing's cover). The track's 3-dot menu is the LAST button of each player
               (pill, Now Playing, Chill bar, mini player), not in the strip.
           Everything that comes and goes here is a <Bubble> (Bubble.jsx): it springs in and out
           like a glass bubble. At narrow widths the tabs are icon-only so everything shares ~380px. */}
@@ -2282,20 +2636,28 @@ export default function App() {
           className={cx('clickable nav-pill-btn', { active: view === 'library', 'icon-only': isNarrowLayout })}
           title="Library"
           aria-label="Library"
-          onClick={() => setView('library')}
+          onClick={onNavLibrary}
         >
           <ListMusic size={15} />
           {!isNarrowLayout && <span>Library</span>}
         </button>
+        {/* Now Playing: a tab like Home and Library (with a song; an icon at narrow widths). Lit
+            while the song is open (Chill included), where clicking it does nothing. A fixed width,
+            so its bubble slot springs to exactly its size. */}
+        <Bubble show={navNowPlayingVisible} variant="slot" width={isNarrowLayout ? NAV_NP_TAB_WIDTH_NARROW : NAV_NP_TAB_WIDTH}>
+          <button
+            className={cx('clickable nav-pill-btn nav-np-tab', { active: isNowPlayingOpen, 'icon-only': isNarrowLayout })}
+            title="Now Playing"
+            aria-label="Now Playing"
+            aria-current={isNowPlayingOpen ? 'page' : undefined}
+            style={{ width: isNarrowLayout ? NAV_NP_TAB_WIDTH_NARROW : NAV_NP_TAB_WIDTH }}
+            onClick={() => { if (!isNowPlayingOpen) openFromFloatingPlayer(); }}
+          >
+            <Disc3 size={15} />
+            {!isNarrowLayout && <span>Now Playing</span>}
+          </button>
+        </Bubble>
         <span className="nav-pill-divider" aria-hidden="true" />
-        <button
-          className={`clickable nav-tool-btn nav-search-btn${searchFilterActive ? ' active' : ''}`}
-          title={searchFilterActive ? 'This list is filtered. Click to change or clear the search (⌘F)' : 'Search (⌘F)'}
-          aria-label="Search"
-          onClick={openSearch}
-        >
-          <Search size={15} />
-        </button>
         <button
           className="clickable nav-tool-btn nav-add-btn"
           title="Add music"
@@ -2305,29 +2667,14 @@ export default function App() {
           <Plus size={16} />
         </button>
       </div>
-      <Bubble show={navRightVisible} variant="float" origin="100% 50%" className="nav-right-pill" {...chillChromeProps} style={{ position: 'fixed', top: 5, right: 16, zIndex: 51, WebkitAppRegion: 'no-drag' }}>
-        <Bubble show={navLyricsVisible} variant="slot" width={28} index={0}>
-          <button
-            className={cx('clickable nav-tool-btn nav-lyrics-btn', { active: navLyricsActive })}
-            title={navLyricsActive ? 'Hide lyrics' : 'Lyrics'}
-            aria-label="Lyrics"
-            aria-pressed={navLyricsActive}
-            onClick={onNavLyrics}
-          >
-            <Mic2 size={15} />
-          </button>
-        </Bubble>
-        <Bubble show={navChillVisible} variant="slot" width={28} index={1}>
-          <button
-            className="clickable nav-tool-btn chill-enter-btn"
-            title="Chill mode"
-            aria-label="Chill mode"
-            onClick={() => { expandNowPlaying(); setIsChillMode(true); }}
-          >
-            <Disc3 size={15} />
-          </button>
-        </Bubble>
-      </Bubble>
+      {/* Now Playing's own pill at the top right: Lyrics | Library, then Chill (see npPillVisible) */}
+      <NowPlayingPill
+        show={npPillVisible}
+        lyrics={{ visible: sideLyricsVisible, on: isLyricsOpen && !npSplit, onClick: toggleSideLyrics }}
+        library={{ visible: sideLibraryVisible && !isNarrowLayout, on: npSplitLibrary, onClick: toggleSideLibrary }}
+        onChill={enterChill}
+        chillTitle={isNarrowLayout ? 'Chill mode (fills the screen)' : 'Chill mode'}
+      />
       {/* Chill mode only: change scene / leave it. They take the right pill's
           place so they fade and return with the rest of the strip (Escape
           works too). */}
@@ -2372,23 +2719,12 @@ export default function App() {
         <PlayerPill
           currentTrack={currentTrack}
           isNowPlayingOpen={isNowPlayingOpen}
-          isPlaying={isPlaying}
           currentTime={currentTime}
           duration={duration}
           isSeeking={isSeeking}
           seekValue={seekValue}
           isSeekHovered={isSeekHovered}
           hoverTime={hoverTime}
-          isShuffle={isShuffle}
-          onToggleShuffle={() => setIsShuffle(!isShuffle)}
-          repeatMode={repeatMode}
-          onToggleRepeat={toggleRepeat}
-          isHoldingPlayPause={isHoldingPlayPause}
-          playPrev={playPrev}
-          playNext={playNext}
-          onPlayPauseClick={handlePlayPauseClick}
-          onPlayPausePressStart={handlePlayPausePressStart}
-          onPlayPausePressEnd={handlePlayPausePressEnd}
           playerArtistTokens={playerArtistTokens}
           playerTitleWrapRef={playerTitleWrapRef}
           playerSubtitleWrapRef={playerSubtitleWrapRef}
@@ -2407,8 +2743,10 @@ export default function App() {
           onSeekBarClick={(time) => { setCurrentTime(time); if (audioRef.current) audioRef.current.currentTime = time; }}
           onSeekHoverMove={(time) => setHoverTime(time)}
           formatTime={formatTime}
-          onExpandCollapseNP={isNowPlayingOpen ? collapseNowPlaying : expandNowPlaying}
+          onExpandCollapseNP={isNowPlayingOpen ? collapseNowPlaying : openFromFloatingPlayer}
           artworkRgb={artworkRgb}
+          // the same controls, at the same sizes, as Chill mode's bar (ChillScene's renderTransport)
+          renderTransport={() => renderTransportControls({ playSize: 40, playIconSize: 17, playMargin: 8, controlSize: 22, secondarySize: 18 })}
         />
       )}
 
@@ -2444,7 +2782,23 @@ export default function App() {
         />
       )}
 
-      {isMiniLayout && (
+      {isMiniLayout && isStripPreview && (
+        <div className="strip-preview" aria-hidden="true">
+          <StripPlayer
+            preview
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            duration={duration}
+            artworkRgb={artworkRgb}
+            marqueeFadeMask={marqueeFadeMask}
+            isShuffle={isShuffle}
+            repeatMode={repeatMode}
+          />
+        </div>
+      )}
+
+      {isMiniLayout && !isStripPreview && (
         <MiniPlayer
           currentTrack={currentTrack}
           isPlaying={isPlaying}
@@ -2465,7 +2819,7 @@ export default function App() {
           // (and the track menu: Escape closes it first)
           restoreOnEscape={!pendingNewTracks && !trackMenu}
           onOpenMenu={(e) => { if (trackMenu) { setTrackMenu(null); return; } setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' }); }}
-          renderTransport={() => renderTransportControls({ playSize: 40, playIconSize: 20, playMargin: 8, controlSize: 22, secondarySize: 18 })}
+          renderTransport={() => renderTransportControls({ playSize: 40, playIconSize: 17, playMargin: 8, controlSize: 22, secondarySize: 18 })}
         />
       )}
 
@@ -2506,28 +2860,6 @@ export default function App() {
           compact={isMiniLayout}
           hasCurrentTrack={!!currentTrack}
           onResolve={resolvePendingTracks}
-        />
-      )}
-
-      {/* The search panel lives at the ROOT, not inside .glass-panel: that card has
-          a backdrop-filter, which makes it its own stacking context (and the
-          containing block for fixed descendants), so nothing in it can out-rank a
-          sibling layer — Chill mode's full-window photo (z 30) covered the panel
-          completely while the button "did nothing". Its CSS `top` is 92px = the
-          42px title strip + the 50px it used to sit below the card's top. */}
-      {searchOpen && !isMiniLayout && (
-        <SearchPanel
-          query={searchQuery}
-          onQueryChange={setSearchQuery}
-          onClose={closeSearch}
-          onDismiss={dismissSearch}
-          library={library}
-          pageTracks={searchScope === 'details' ? detailPageTracks : null}
-          pageLabel={homeDetailItem ? detailItemLabel(homeDetailItem) : ''}
-          onOpenDetail={openDetailFromSearch}
-          playTrack={playTrackFresh}
-          currentTrack={currentTrack}
-          isNarrowLayout={isNarrowLayout}
         />
       )}
 

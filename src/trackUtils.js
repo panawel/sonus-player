@@ -138,6 +138,9 @@ export const TITLE_STRIP_HEIGHT = 42;
 // better. Shared (not hardcoded in App.jsx) for the same reason as the
 // width breakpoints above, and because main.js's minHeight is tuned against it.
 export const MINI_LAYOUT_HEIGHT_BREAKPOINT = 420;
+// The mini player's own minimum (its content needs 180px). A window made shorter shows the strip
+// in place, and becomes Strip mode when the resize ends (main.js; windowModes.mjs has the same 180).
+export const MINI_MIN_HEIGHT = 180;
 
 // 0..3 — how many of an ordered extra-columns list currently fit, given the
 // three width tiers above. Each wider threshold implies the narrower ones,

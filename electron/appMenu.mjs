@@ -30,7 +30,7 @@ export const MENU_COMMANDS = [
 // enterChill: File > Chill Mode. main.js makes it a window resize plus the
 // `enter-chill` command (see enterChillMode there).
 export function fileMenuTemplate({ send, setWindowMode, enterChill }) {
-  // The three size items also end Chill mode: it is a setting in the page, not
+  // The size items (and Strip Mode) also end Chill mode: it is a setting in the page, not
   // part of the window size, so a resize alone leaves it on (Filled Screen
   // Mode right after Chill Mode changed nothing, and a Narrow/Mini excursion
   // brought it back when the window grew again). Chill Mode's own resize goes
@@ -45,6 +45,7 @@ export function fileMenuTemplate({ send, setWindowMode, enterChill }) {
     { id: 'file-filled', label: 'Filled Screen Mode', accelerator: 'Ctrl+Command+M', click: resizeTo('filled') },
     { id: 'file-narrow', label: 'Narrow Mode', accelerator: 'Alt+CommandOrControl+2', click: resizeTo('narrow') },
     { id: 'file-mini', label: 'Mini Mode', accelerator: 'Alt+CommandOrControl+3', click: resizeTo('mini') },
+    { id: 'file-strip', label: 'Strip Mode', accelerator: 'Alt+CommandOrControl+4', click: resizeTo('strip') },
     // Needs a loaded song, like Next/Previous: see applyMenuState.
     { id: 'file-chill', label: 'Chill Mode', accelerator: 'Shift+CommandOrControl+C', enabled: false, click: () => enterChill() },
     { type: 'separator' },

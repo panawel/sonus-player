@@ -16,7 +16,7 @@ const ARTWORK_SIZE = 44;
 const PILL_RADIUS = 18;
 const ARTWORK_RADIUS = PILL_RADIUS - 1 - (PILL_HEIGHT - ARTWORK_SIZE) / 2; // - 1: the pill's border
 const PLAY_PAUSE_SIZE = 44;
-const PLAY_PAUSE_ICON_SIZE = 20;
+const PLAY_PAUSE_ICON_SIZE = 19;
 const NEXT_ICON_SIZE = 20;
 export const PLAYER_PILL_NARROW_TOTAL_HEIGHT = PILL_HEIGHT;
 export const PLAYER_PILL_NARROW_BOTTOM_MARGIN = 14;
@@ -126,7 +126,7 @@ export default function PlayerPillNarrow({
 
           <button
             className={cx('clickable play-pause-btn', { 'play-pause-btn--playing': isPlaying })}
-            style={{ width: PLAY_PAUSE_SIZE, height: PLAY_PAUSE_SIZE, color: 'var(--chrome-text)', flexShrink: 0, position: 'relative' }}
+            style={{ width: PLAY_PAUSE_SIZE, height: PLAY_PAUSE_SIZE, color: 'var(--play-icon)', flexShrink: 0, position: 'relative' }}
             onClick={(e) => { e.stopPropagation(); onPlayPauseClick(e); }}
             onMouseDown={onPlayPausePressStart}
             onMouseUp={onPlayPausePressEnd}
@@ -139,7 +139,7 @@ export default function PlayerPillNarrow({
                 <circle
                   cx={HOLD_RING_SIZE / 2} cy={HOLD_RING_SIZE / 2} r={HOLD_RING_RADIUS}
                   fill="none"
-                  stroke="#00f2fe"
+                  stroke="rgb(var(--art-rgb))"
                   strokeWidth="3"
                   strokeLinecap="round"
                   strokeDasharray={HOLD_RING_CIRCUMFERENCE}

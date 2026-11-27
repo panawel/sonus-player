@@ -18,6 +18,14 @@
 @import '@fontsource/inter/700.css';
 
 :root {
+  /* The players' look (every player, every view): white seek lines and a white play disc, glowing
+     in the song's artwork colour. --art-rgb is set by App.jsx / StripApp.jsx (glowColor.js). */
+  --art-rgb: 255, 255, 255;
+  --play-icon: #24152e;
+  --seek-fill: linear-gradient(to right, rgba(255, 255, 255, 0.75) 0%, #ffffff var(--progress, 0%), rgba(255, 255, 255, 0.3) var(--progress, 0%));
+  /* the artwork glow, plus a soft dark edge so the white line also stands out on a light cover's tint */
+  --seek-glow: drop-shadow(0 0 4px rgba(var(--art-rgb), 0.85)) drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.3));
+  --seek-knob-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18), 0 2px 6px rgba(0, 0, 0, 0.3);
   --glass-bg: rgba(255, 255, 255, 0.05);
   --glass-panel: rgba(255, 255, 255, 0.08);
   --glass-border: rgba(255, 255, 255, 0.1);
@@ -57,7 +65,7 @@ body {
 }
 
 /* Buttons, inputs and scrollable areas need no-drag to be interactive */
-button, input, textarea, a, .clickable, .scrollable, .search-panel, .track-dropdown {
+button, input, textarea, a, .clickable, .scrollable, .track-dropdown {
   -webkit-app-region: no-drag;
 }
 
@@ -162,12 +170,26 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  /* a white disc, a dark icon (the buttons' inline color is var(--play-icon)), glowing in the artwork's colour */
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 6px 20px rgba(var(--art-rgb), 0.45), 0 3px 10px rgba(0, 0, 0, 0.22), inset 0 -2px 5px rgba(0, 0, 0, 0.08);
   border: none;
   border-radius: 50%;
   cursor: pointer;
   outline: none;
-  transition: transform 0.2s ease, filter 0.15s ease;
+  transition: transform 0.2s ease;
+}
+/* While playing the glow breathes: an opacity-only layer (no box-shadow animation, which would
+   repaint every frame) */
+.play-pause-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 22px 2px rgba(var(--art-rgb), 0.75);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
 }
 .play-pause-btn:hover {
   transform: scale(1.06);
@@ -175,14 +197,15 @@ textarea::placeholder {
 .play-pause-btn:active {
   transform: scale(0.92);
 }
-/* drop-shadow, not box-shadow — this is a bare SVG icon, no filled shape for
-   a box-shadow to hug. Always plain white, matching the icon's own color. */
-@keyframes icon-glow-pulse {
-  0%, 100% { filter: drop-shadow(0 0 6px rgba(255,255,255,0.4)); }
-  50%       { filter: drop-shadow(0 0 12px rgba(255,255,255,0.55)); }
+@keyframes play-glow-breathe {
+  0%, 100% { opacity: 0.35; }
+  50%       { opacity: 0.85; }
 }
-.play-pause-btn--playing {
-  animation: icon-glow-pulse 2s ease-in-out infinite;
+.play-pause-btn--playing::after {
+  animation: play-glow-breathe 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .play-pause-btn--playing::after { animation: none; opacity: 0.6; }
 }
 
 .player-meta-link {
@@ -308,52 +331,13 @@ textarea::placeholder {
    constants in PlayerPill.jsx) are untouched — only this chrome padding
    shrinks, per an explicit user request to flatten the pill without shrinking
    any content. */
-.player-pill .player-control-button {
+.player-pill:not(.player-pill--bar) .player-control-button {
   padding: 9px;
 }
 
-/* The pill's seek line (its own row, between the elapsed and remaining times).
-   Same hover-thicken/drag-to-seek convention as .top-progress-bar, but a fully
-   separate class (not reusing .top-progress-bar/.wow-slider) so it can't
-   inherit any of those rules' dark-theme colors. Its colors are Now Playing's
-   and the mini player's, though — the cyan-to-blue fill and the glowing white
-   dot — so the seek line reads the same on every screen. The input keeps the app's
-   tall invisible hit box (22px) around a 4px drawn line — the line used to be
-   2px drawn inside a 9px strip along the pill's bottom edge, hence its ends
-   ran into the rounded corners. */
-input[type="range"].pill-seek-bar {
-  height: 22px;
-  display: block;
-}
-input[type="range"].pill-seek-bar::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 2px;
-  background: linear-gradient(to right, var(--np-slider-color, #00f2fe) 0%, var(--np-slider-color, #4facfe) var(--progress, 0%), rgba(255, 255, 255, 0.22) var(--progress, 0%));
-  transition: height 0.15s ease, background 0.2s ease;
-}
-input[type="range"].pill-seek-bar--hovered::-webkit-slider-runnable-track {
-  height: 6px;
-}
-input[type="range"].pill-seek-bar::-webkit-slider-thumb {
-  opacity: 1;
-  transform: scale(1);
-  height: 11px;
-  width: 11px;
-  margin-top: -3.5px;
-  background: #ffffff;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
-  transition: transform 0.15s ease;
-}
-input[type="range"].pill-seek-bar--hovered::-webkit-slider-thumb {
-  transform: scale(1.25);
-  margin-top: -2.5px;
-}
-
-/* Mini player (MiniPlayer.jsx): the seek line and the animated bars. Same
-   range-input override pattern as .pill-seek-bar above, but with Now
-   Playing's own look (.wow-slider's cyan-to-blue fill and the glowing white
-   dot) rather than the pill's flat accent blue, to match the full-screen
-   player it borrows its lights from. */
+/* Mini player (MiniPlayer.jsx): the seek line and the animated bars (also the seek line of Chill's
+   bar and the floating player, which is the same bar). Every player's look: white fill, artwork
+   glow, white knob (see :root). */
 /* The input keeps the app's 24px invisible hit box (the base
    input[type="range"] rule) instead of shrinking to the 4px it draws — an
    earlier version set height: 4px and left only the thin line clickable. The
@@ -368,7 +352,7 @@ input[type="range"].mini-seek-bar::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 2px;
   transition: height 0.15s ease;
-  background: linear-gradient(to right, var(--np-slider-color, #00f2fe) 0%, var(--np-slider-color, #4facfe) var(--progress, 0%), rgba(255, 255, 255, 0.22) var(--progress, 0%));
+  background: var(--seek-fill);
 }
 input[type="range"].mini-seek-bar::-webkit-slider-thumb {
   opacity: 1;
@@ -377,7 +361,7 @@ input[type="range"].mini-seek-bar::-webkit-slider-thumb {
   width: 11px;
   margin-top: -3.5px;
   background: #ffffff;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  box-shadow: var(--seek-knob-shadow);
   transition: transform 0.15s ease;
 }
 /* Hover thickens the line like the other seek bars do (:hover on the whole
@@ -470,10 +454,11 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
 /* Title-bar navigation (App.jsx), three glass pieces in one material (the same
    as .glass-button, so it reads as one design language): a round back arrow
    (.nav-round-btn, only where there is somewhere to go back to), one centred
-   pill (.nav-pill: Home | Library, a divider, then the Search and "+" tools),
-   and a small pill at the right (.nav-right-pill: Chill mode and the 3-dot
-   menu). The traffic lights always occupy the far left; at the narrowest
-   window the tabs go icon-only so back arrow + pill + right pill still fit. */
+   pill (.nav-pill: Home | Library | Now Playing (with a song), a divider,
+   then "+"). Nothing at the right except Chill mode's own buttons. The traffic
+   lights always occupy the far left; at the narrowest window the tabs go
+   icon-only so the back arrow and the pill still fit. */
+/* .nav-right-pill: Now Playing's own pill at the top right (NowPlayingPill.jsx) */
 .nav-pill,
 .nav-right-pill {
   display: flex;
@@ -577,6 +562,22 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
 .nav-tool-btn.active { color: var(--chrome-text); }
 .nav-tool-btn.active::before { transform: scale(1); opacity: 1; }
 
+/* NowPlayingPill.jsx: [ Lyrics | Library ] · Chill. Its spacing comes from the toggle's own gap and
+   the divider's margins (an empty toggle must not leave a gap). Lyrics and the Library share one
+   lit thumb that springs between them; their own fill circles stay off. NowPlayingPill sets its translateX. */
+.np-pill { gap: 0; }
+.np-pill-toggle { position: relative; display: flex; align-items: center; gap: 2px; isolation: isolate; }
+.np-pill-thumb {
+  position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; z-index: -1;
+  background: var(--glass-active);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  pointer-events: none;
+  transition: transform 0.55s var(--spring-ease, cubic-bezier(0.34, 1.56, 0.64, 1)), opacity 0.2s ease;
+}
+.np-pill-toggle .nav-tool-btn::before { display: none; }
+.np-pill-toggle .nav-tool-btn.active:hover { background: transparent; }
+@media (prefers-reduced-motion: reduce) { .np-pill-thumb { transition-duration: 0.01s; } }
+
 /* <Bubble> (Bubble.jsx): the content of a slot inside a pill. The slot's width springs; it must
    not clip, since the entrance overshoots and the glass rim glows outside the button. */
 .bubble-slot { display: flex; align-items: center; flex: none; overflow: visible; }
@@ -606,194 +607,6 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
   color: var(--chrome-text);
 }
 
-/* Search panel (SearchPanel.jsx): a floating Spotlight-style layer under the
-   title bar, opened by the title bar's search button or ⌘F. Same corner
-   radius family as the pill (18px). Opaque-ish dark glass rather than the
-   pill's 0.45 scrim: it carries a lot of small text and floats over arbitrary
-   page content, so it needs the contrast the pill gets from being short. */
-.search-panel {
-  position: fixed;
-  /* 92 = the 42px title strip + 50px. It used to sit INSIDE .glass-panel (whose
-     backdrop-filter made it the containing block, so 50px was measured from the
-     card's top); it is now a root-level sibling so Chill mode's full-window
-     layer can't cover it, and the strip is spelled out. */
-  top: 92px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 40;
-  max-height: min(540px, calc(100vh - 170px));
-  display: flex;
-  flex-direction: column;
-  background: rgba(18, 12, 18, 0.84);
-  backdrop-filter: blur(40px) saturate(150%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
-  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  color: var(--chrome-text);
-  overflow: hidden;
-  animation: search-panel-in 0.16s ease-out;
-}
-@keyframes search-panel-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(-6px) scale(0.985); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-}
-.search-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 8px 0 14px;
-  height: 48px;
-  flex-shrink: 0;
-}
-.search-panel-input {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--chrome-text);
-  font-size: 15px;
-}
-.search-panel-input::placeholder { color: var(--chrome-text-dim); }
-.search-panel-chip {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 190px;
-  height: 26px;
-  padding: 0 8px 0 10px;
-  border: none;
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--chrome-text);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.search-panel-chip:hover { background: rgba(255, 255, 255, 0.2); }
-.search-panel-chip-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.search-panel-x {
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 50%;
-  background: none;
-  color: var(--chrome-text-dim);
-  cursor: pointer;
-}
-.search-panel-x:hover { color: var(--chrome-text); background: var(--glass-highlight); }
-.search-panel-body {
-  overflow-y: auto;
-  padding: 2px 14px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-.search-panel-h {
-  margin: 14px 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--chrome-text-dim);
-}
-.search-panel-none {
-  margin: 22px 0 8px;
-  text-align: center;
-  font-size: 14px;
-  color: var(--chrome-text-dim);
-}
-.search-panel-tiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-}
-.search-panel-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 0.15s ease;
-}
-.search-panel-tile:hover { transform: translateY(-2px); }
-.search-panel-tile-title {
-  max-width: 100%;
-  font-size: 12.5px;
-  font-weight: 600;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.search-panel-tile-sub {
-  max-width: 100%;
-  font-size: 11.5px;
-  color: var(--chrome-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.search-panel-song {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  height: 48px;
-  padding: 0 8px;
-  border-radius: 10px;
-  cursor: default;
-}
-.search-panel-song-art {
-  width: 34px;
-  height: 34px;
-  border-radius: 7px;
-  overflow: hidden;
-  flex-shrink: 0;
-  background: var(--glass-active);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.search-panel-song-title {
-  font-size: 13.5px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.search-panel-song-sub {
-  font-size: 12px;
-  color: var(--chrome-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.search-panel-song-time {
-  font-size: 12.5px;
-  color: var(--chrome-text-dim);
-  font-variant-numeric: tabular-nums;
-}
-.search-panel-more {
-  display: block;
-  margin: 10px auto 0;
-  padding: 7px 18px;
-  border-radius: 18px;
-  font-size: 12.5px;
-  font-weight: 600;
-}
 
 /* Confirm modal (Play / Play Next / Add to Queue / Cancel): floats over the
    tracklist with no opaque vibrancy material backing it, unlike .glass-panel's
@@ -1102,12 +915,13 @@ input[type="range"]::-webkit-slider-runnable-track {
 }
 
 input[type="range"].wow-slider::-webkit-slider-runnable-track {
-  background: linear-gradient(
-    to right,
-    var(--np-slider-color, #00f2fe) 0%,
-    var(--np-slider-color, #4facfe) var(--progress, 0%),
-    rgba(255,255,255,0.2) var(--progress, 0%)
-  );
+  background: var(--seek-fill);
+}
+/* the glow: a drop-shadow follows the line's own alpha, so the filled (white) part glows in the
+   artwork's colour and the faint rest barely does */
+input[type="range"].wow-slider,
+input[type="range"].mini-seek-bar {
+  filter: var(--seek-glow);
 }
 
 input[type="range"]::-webkit-slider-thumb {
@@ -1116,7 +930,7 @@ input[type="range"]::-webkit-slider-thumb {
   width: 12px;
   border-radius: 50%;
   background: #ffffff;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  box-shadow: var(--seek-knob-shadow);
   cursor: pointer;
   margin-top: -4px;
   opacity: 0;
@@ -1125,12 +939,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 input[type="range"].wow-slider:hover::-webkit-slider-runnable-track {
-  background: linear-gradient(
-    to right,
-    var(--np-slider-color, #00f2fe) 0%,
-    var(--np-slider-color, #4facfe) var(--progress, 0%),
-    rgba(255,255,255,0.3) var(--progress, 0%)
-  );
+  background: linear-gradient(to right, rgba(255, 255, 255, 0.75) 0%, #ffffff var(--progress, 0%), rgba(255, 255, 255, 0.38) var(--progress, 0%));
 }
 
 input[type="range"]:hover::-webkit-slider-thumb,
@@ -1311,29 +1120,6 @@ input[type="range"].top-progress-bar--narrow {
   transform: scale(0.88);
 }
 
-/* Now Playing ambient color wash — circles inside blur furnace */
-@keyframes np-flare-1 {
-  0%   { transform: translate(0,    0)    scale(1);    }
-  25%  { transform: translate(40%,  10%)  scale(1.3);  }
-  50%  { transform: translate(55%,  25%)  scale(0.75); }
-  75%  { transform: translate(20%,  40%)  scale(1.2);  }
-  100% { transform: translate(0,    0)    scale(1);    }
-}
-@keyframes np-flare-2 {
-  0%   { transform: translate(0,    0)    scale(1);    }
-  25%  { transform: translate(-30%, -10%) scale(0.7);  }
-  50%  { transform: translate(-50%, -30%) scale(1.35); }
-  75%  { transform: translate(-20%, -45%) scale(0.85); }
-  100% { transform: translate(0,    0)    scale(1);    }
-}
-@keyframes np-flare-3 {
-  0%   { transform: translate(0,    0)    scale(1);    }
-  25%  { transform: translate(-45%, 15%)  scale(1.25); }
-  55%  { transform: translate(-20%, 35%)  scale(0.7);  }
-  80%  { transform: translate(-50%, 20%)  scale(1.1);  }
-  100% { transform: translate(0,    0)    scale(1);    }
-}
-
 /* Now Playing: lyrics toggle, centered in the top row — the same Mic2 glyph
    as the track list's row indicator, not text. Position and color (white
    when open, dimmed when closed) are set inline in App.jsx, so this only
@@ -1354,7 +1140,7 @@ input[type="range"].top-progress-bar--narrow {
 
 /* ─── Home screen ─────────────────────────────────────────────────── */
 
-/* Genre filter chip row — hides scrollbar, chips never wrap */
+/* Home's filter row (All + the decades; the class name is from when it held genres) — hides scrollbar, chips never wrap */
 .home-genre-chips {
   display: flex;
   gap: 8px;
@@ -1364,6 +1150,10 @@ input[type="range"].top-progress-bar--narrow {
   scrollbar-width: none;
 }
 .home-genre-chips::-webkit-scrollbar { display: none; }
+/* (HomeView's ChipRow) its edges fade where more chips are hidden, so you can tell the row scrolls */
+.home-genre-chips.fade-right { mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent); }
+.home-genre-chips.fade-left { mask-image: linear-gradient(90deg, transparent, #000 48px); }
+.home-genre-chips.fade-left.fade-right { mask-image: linear-gradient(90deg, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
 
 .home-genre-chip {
   flex-shrink: 0;
@@ -1769,14 +1559,21 @@ input[type="range"].top-progress-bar--narrow {
   left: 50%;
   bottom: 22px;
   transform: translateX(-50%);
-  width: min(640px, calc(100% - 48px));
+  transition: opacity 0.6s ease;
+}
+/* ONE bar, two places: Chill mode's bar and the floating player on Home / Library / detail pages
+   (PlayerPill.jsx, `.player-pill--bar`) share their whole shape — width, padding, corners, border,
+   dark glass. The floating player only adds the song's colour over it (its tint layer) and its
+   soft glow; both sit 22px above the window's bottom, centred. */
+.chill-bar,
+.player-pill.player-pill--bar {
+  width: min(640px, calc(100vw - 48px));
   box-sizing: border-box;
   padding: 12px 18px 8px;
   border-radius: 20px;
   background: rgba(18, 13, 10, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(24px) saturate(140%);
-  transition: opacity 0.6s ease;
 }
 .chill-bar-top { display: flex; align-items: center; gap: 16px; }
 .chill-meta { flex: 1; min-width: 0; }
@@ -2077,3 +1874,167 @@ input[type="range"].top-progress-bar--narrow {
 @media (prefers-reduced-motion: reduce) {
   .chill-scene-btn[data-loading="true"]::after { animation-duration: 2.4s; }
 }
+
+/* ── Strip mode (StripPlayer.jsx, in its own window: StripApp.jsx): one slim glass capsule beside the macOS Dock ──
+   The strip window has no vibrancy and no shadow (main.js): the capsule draws its own glass and
+   shadow, and the margins around it stay clear. Everything is no-drag: dragging it moves the window
+   page-driven (StripPlayer.jsx), and the page must receive the pointer for that. */
+/* The strip previewed inside the main window while it is shrunk below the mini player's minimum. */
+.strip-preview { position: fixed; inset: 0; z-index: 200; pointer-events: none; }
+.strip-preview .strip-window { pointer-events: none; }
+.strip-window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  z-index: 200;
+}
+.strip-player {
+  position: relative;
+  width: 100%;
+  height: clamp(32px, calc(100vh - 10px), 40px);
+  border-radius: 999px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px 0 5px;
+  background: rgba(26, 26, 30, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  color: var(--chrome-text);
+  user-select: none;
+  touch-action: none;
+}
+.strip-cover {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--chrome-text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.strip-cover img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.strip-cover-expand { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); color: #fff; opacity: 0; transition: opacity 0.15s ease; }
+.strip-cover:hover .strip-cover-expand { opacity: 1; }
+.strip-text { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+/* The seek line, under the title: a 12px hit area around a 3px line; the knob shows on hover. */
+.strip-seek { position: relative; height: 12px; margin-top: 1px; cursor: pointer; touch-action: none; }
+.strip-seek--off { cursor: default; }
+.strip-seek-track, .strip-seek-fill { position: absolute; left: 0; top: 5px; height: 3px; border-radius: 2px; pointer-events: none; }
+.strip-seek-track { right: 0; background: rgba(255, 255, 255, 0.2); }
+.strip-seek-fill { background: linear-gradient(to right, rgba(255, 255, 255, 0.75), #ffffff); box-shadow: 0 0 8px rgba(var(--art-rgb), 0.85); }
+.strip-seek-knob { position: absolute; top: 2px; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18); opacity: 0; transition: opacity 0.15s ease; pointer-events: none; }
+.strip-seek:not(.strip-seek--off):hover .strip-seek-knob, .strip-seek--active .strip-seek-knob { opacity: 1; }
+.strip-sub { font-size: 11px; line-height: 1.25; color: var(--chrome-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.strip-btn {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--chrome-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.strip-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.strip-btn--minor { width: 26px; height: 26px; color: var(--chrome-text-off); }
+.strip-btn--minor.player-toggle--on { color: var(--chrome-text); }
+
+
+/* Liquid colour (LiquidCover.jsx): the background behind Now Playing and the mini player. The
+   canvas is drawn at half size and scaled up; no grain layer (the shader dithers). */
+.liquid-cover { position: absolute; inset: 0; overflow: hidden; pointer-events: none; background: #1d1730; }
+.liquid-cover-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.liquid-cover-canvas:not([data-shown]) { opacity: 0; } /* until its first paint: never an undrawn (black) canvas */
+.liquid-cover-sheen { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 38%); }
+
+/* Now Playing's lyrics, a reading spotlight (LyricsSpotlight.jsx): centred, starting at the top.
+   The lines in the reading band are lit, the next ones half lit, the rest dim; only opacity and
+   transform change. */
+.lyrics-spot { position: absolute; inset: 0; container-type: size; }
+.lyrics-spot-scroll {
+  position: absolute; inset: 0; overflow-y: auto; box-sizing: border-box;
+  /* the bottom padding lets the last lines come up a little */
+  padding: 56px 30px 30cqh;
+  mask-image: linear-gradient(180deg, transparent 0, #000 40px, #000 calc(100% - 90px), transparent);
+}
+.lyrics-spot--narrow .lyrics-spot-scroll { padding-left: 4px; padding-right: 4px; padding-top: 24px; } /* (no orb to clear any more: the Lyrics pill is in the top bar) */
+.lyrics-spot-body { max-width: 34em; margin: 0 auto; text-align: center; }
+.lyrics-spot-head { margin-bottom: 22px; }
+.lyrics-spot-kicker { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255, 255, 255, 0.45); }
+.lyrics-spot-verse { margin-bottom: 30px; }
+.lyrics-spot-line {
+  display: block; color: #fff; opacity: 0.3;
+  font-size: clamp(19px, 4.3cqi, 28px); font-weight: 700; letter-spacing: -0.01em;
+  /* a wrapped line splits evenly, and its two halves sit closer together than two lines do */
+  line-height: 1.22; margin-bottom: 0.3em; text-wrap: balance;
+  transform-origin: center;
+  transition: opacity 0.35s ease, transform 0.45s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.lyrics-spot--narrow .lyrics-spot-line { font-size: clamp(19px, 5.6cqi, 23px); }
+.lyrics-spot-line[data-spot="near"] { opacity: 0.62; }
+.lyrics-spot-line[data-spot="lit"] { opacity: 1; transform: scale(1.03); text-shadow: 0 0 24px rgba(var(--art-rgb), 0.35); }
+@media (prefers-reduced-motion: reduce) { .lyrics-spot-line { transition: opacity 0.2s ease; } .lyrics-spot-line[data-spot="lit"] { transform: none; } }
+
+/* The Library's search (TrackListHeader.jsx): a 🔍 in the column header's leading slot, and the
+   field that grows out of it over the Title column. */
+.track-header-search {
+  width: 26px; height: 26px; border-radius: 50%; border: none; padding: 0; background: transparent;
+  display: grid; place-items: center; color: var(--chrome-text-dim); cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+.track-header-search:hover { background: rgba(255, 255, 255, 0.12); color: var(--chrome-text); }
+.track-header-search.hidden { opacity: 0; pointer-events: none; }
+.track-header-title-zone .track-header-label { transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.32, 0.72, 0, 1); }
+.track-header-title-zone.search-open .track-header-label { opacity: 0; transform: translateX(10px); pointer-events: none; }
+.list-search {
+  position: absolute; right: 0; top: 50%; height: 30px; margin-top: -15px; z-index: 2;
+  display: flex; align-items: center; gap: 8px; padding: 0 5px 0 11px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 8px 24px rgba(0, 0, 0, 0.2);
+  transform-origin: 14px 50%; opacity: 0; transform: scaleX(0.12); pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.42s cubic-bezier(0.34, 1.3, 0.5, 1);
+  text-transform: none; letter-spacing: 0;
+}
+.list-search.open { opacity: 1; transform: none; pointer-events: auto; }
+.list-search-icon { flex-shrink: 0; color: rgba(255, 255, 255, 0.8); }
+.list-search input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent; padding: 0;
+  font: inherit; font-size: 13.5px; font-weight: 500; color: var(--chrome-text); text-transform: none; letter-spacing: 0;
+}
+.list-search input::placeholder { color: rgba(255, 255, 255, 0.45); }
+.list-search-count { font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.6); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.list-search-clear {
+  width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; border: none; padding: 0; cursor: pointer;
+  display: grid; place-items: center; color: var(--chrome-text); background: rgba(255, 255, 255, 0.16);
+}
+.list-search-clear:hover { background: rgba(255, 255, 255, 0.28); }
+@media (prefers-reduced-motion: reduce) { .list-search { transition: opacity 0.15s ease; } }
+/* the matched words in each row */
+mark.search-hit { background: none; color: var(--chrome-text); font-weight: 800; text-shadow: 0 0 14px rgba(var(--art-rgb), 0.55); }
+.list-search-empty { color: var(--text-secondary); text-align: center; margin-top: 80px; font-size: 15px; }
+.list-search-empty b { color: var(--chrome-text); }
+.list-search-empty button {
+  margin-top: 14px; padding: 7px 16px; border: none; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600;
+  color: var(--chrome-text); background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.25);
+}
+.list-search-empty button:hover { background: rgba(255, 255, 255, 0.22); }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import cx from 'classnames';
 import { Music, Maximize2, MoreVertical } from 'lucide-react';
-import AmbientFlares from './AmbientFlares.jsx';
+import LiquidCover from './LiquidCover.jsx';
 
 const marqueeDuration = (d) => `${Math.min(14, Math.max(4, 3 + d / 30))}s`;
 
@@ -103,11 +103,8 @@ export default function MiniPlayer({
         WebkitAppRegion: 'drag',
       }}
     >
-      {/* Now Playing's drifting lights (moving only while playing). Its 100px
-          blur is tuned for a full panel; scaled to the window height here so
-          the lights stay as soft-edged but still read as colour in a card
-          this small. */}
-      <AmbientFlares artworkRgb={artworkRgb} isPlaying={isPlaying} blur="clamp(36px, 14vh, 64px)" />
+      {/* Now Playing's background, liquid colour (moving only while playing) */}
+      <LiquidCover src={currentTrack?.thumb} isPlaying={isPlaying} />
 
       <button
         className="mini-restore-btn clickable"

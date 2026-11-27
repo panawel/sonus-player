@@ -3,6 +3,7 @@ import { Music, Play, Shuffle, RotateCcw, ChevronLeft, ChevronRight } from 'luci
 import cx from 'classnames';
 import { snapToTier, tierLabel, splitArtists, detectScript } from './audioUtils.js';
 import { formatTime } from './trackUtils.js';
+import { decadesOf, decadeLabel, filterByDecade } from './homeDecades.js';
 
 // Mulberry32 seeded PRNG — deterministic shuffle that stays stable until user hits Refresh.
 function mulberry32(seed) {
@@ -25,22 +26,39 @@ function seededShuffle(arr, seed) {
   return result;
 }
 
-function trackMatchesGenre(track, genre) {
-  if (!genre) return true;
-  return (track.genre || '')
-    .split(',')
-    .map(g => g.trim())
-    .includes(genre);
-}
-
-function parseGenres(library) {
-  const set = new Set();
-  for (const track of library) {
-    if (track.genre) {
-      track.genre.split(',').map(g => g.trim()).filter(Boolean).forEach(g => set.add(g));
-    }
-  }
-  return Array.from(set).sort();
+// Home's filter row (one row: All, then the decades). When it overflows, its edges fade where
+// more chips are hidden, and a vertical mouse wheel scrolls it sideways (only while it can still
+// move, so the page scrolls normally once the row reaches an end).
+function ChipRow({ className, children, ...rest }) {
+  const ref = useRef(null);
+  const [edges, setEdges] = useState({ l: false, r: false });
+  const update = () => {
+    const el = ref.current;
+    if (!el) return;
+    const l = el.scrollLeft > 2, r = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setEdges((e) => (e.l === l && e.r === r ? e : { l, r }));
+  };
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      const before = el.scrollLeft;
+      el.scrollLeft += e.deltaY;
+      if (el.scrollLeft !== before) e.preventDefault();
+    };
+    el.addEventListener('scroll', update, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => { el.removeEventListener('scroll', update); el.removeEventListener('wheel', onWheel); ro.disconnect(); };
+  }, []);
+  useEffect(update); // the chips themselves can change (a new decade in the library)
+  return (
+    <div ref={ref} className={cx(className, { 'fade-left': edges.l, 'fade-right': edges.r })} {...rest}>
+      {children}
+    </div>
+  );
 }
 
 function groupByAlbum(tracks) {
@@ -994,7 +1012,6 @@ const MAX_SECTION_CARDS = 20;
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, playTrack, playAllTracks, onOpenDetail, isActive }) {
-  const [genreFilter,      setGenreFilter]      = useState(null);
   const [quickPickSeed,    setQuickPickSeed]    = useState(() => Math.random());
   const [albumSeed,        setAlbumSeed]        = useState(() => Math.random());
   const [artistSeed,       setArtistSeed]       = useState(() => Math.random());
@@ -1097,26 +1114,9 @@ const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, play
     el.scrollTo({ left: target, behavior: 'smooth' });
   };
 
-  const genres = useMemo(() => parseGenres(library), [library]);
-  const decades = useMemo(() => {
-    const set = new Set();
-    for (const t of library) {
-      const y = parseInt(t.year);
-      if (!isNaN(y) && y > 0) set.add(Math.floor(y / 10) * 10);
-    }
-    return [...set].sort((a, b) => a - b);
-  }, [library]);
-  const decadeLabel = d => `${String(d).slice(2)}s`;
-
-  const filteredLibrary = useMemo(() => {
-    let result = library;
-    if (genreFilter) result = result.filter(t => trackMatchesGenre(t, genreFilter));
-    if (decadeFilter) result = result.filter(t => {
-      const y = parseInt(t.year);
-      return !isNaN(y) && y >= decadeFilter && y < decadeFilter + 10;
-    });
-    return result;
-  }, [library, genreFilter, decadeFilter]);
+  // The one filter: a decade (homeDecades.js). It filters every section below, and the totals line.
+  const decades = useMemo(() => decadesOf(library), [library]);
+  const filteredLibrary = useMemo(() => filterByDecade(library, decadeFilter), [library, decadeFilter]);
 
   const scriptData = useMemo(() => {
     const counts = {};
@@ -1132,6 +1132,7 @@ const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, play
   const allArtists = useMemo(() => groupByArtist(library), [library]);
   const allAlbumsCount = useMemo(() => groupByAlbum(library).length, [library]);
   const totalDuration  = useMemo(() => library.reduce((sum, t) => sum + (t.duration || 0), 0), [library]);
+  const filteredDuration = useMemo(() => filteredLibrary.reduce((sum, t) => sum + (t.duration || 0), 0), [filteredLibrary]);
   const albums = useMemo(() => groupByAlbum(filteredLibrary), [filteredLibrary]);
   const artists = useMemo(() => groupByArtist(filteredLibrary), [filteredLibrary]);
 
@@ -1141,11 +1142,11 @@ const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, play
     const pool = eligible.length > 0 ? eligible : allArtists;
     if (pool.length === 0) return null;
     const picked = seededShuffle(pool, heroSeed)[0] || null;
-    if (!genreFilter && !decadeFilter) return picked;
+    if (!decadeFilter) return picked;
     const inFiltered = picked && artists.find(a => a.name === picked.name);
     if (inFiltered) return inFiltered;
     return [...artists].sort((a, b) => b.tracks.length - a.tracks.length)[0] || null;
-  }, [heroSeed, genreFilter, decadeFilter, allArtists, artists]);
+  }, [heroSeed, decadeFilter, allArtists, artists]);
 
   const topArtists = useMemo(() =>
     [...artists].sort((a, b) => b.tracks.length - a.tracks.length).slice(0, 5),
@@ -1236,23 +1237,12 @@ const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, play
 
       {/* Filters + library stats */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {genres.length > 0 && (
-          <div className="home-genre-chips">
-            <button
-              className={cx('home-genre-chip clickable', { active: genreFilter === null })}
-              onClick={() => setGenreFilter(null)}
-            >All</button>
-            {genres.map(g => (
-              <button
-                key={g}
-                className={cx('home-genre-chip clickable', { active: genreFilter === g })}
-                onClick={() => setGenreFilter(g === genreFilter ? null : g)}
-              >{g}</button>
-            ))}
-          </div>
-        )}
         {decades.length > 1 && (
-          <div className="home-genre-chips">
+          <ChipRow className="home-genre-chips" data-home-decades>
+            <button
+              className={cx('home-genre-chip clickable', { active: decadeFilter === null })}
+              onClick={() => setDecadeFilter(null)}
+            >All</button>
             {decades.map(d => (
               <button
                 key={d}
@@ -1260,10 +1250,12 @@ const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, play
                 onClick={() => setDecadeFilter(d === decadeFilter ? null : d)}
               >{decadeLabel(d)}</button>
             ))}
-          </div>
+          </ChipRow>
         )}
-        <div style={{ fontSize: 11, color: 'var(--text-secondary)', opacity: 0.6, letterSpacing: '0.04em', paddingLeft: 2 }}>
-          {library.length} {library.length === 1 ? 'song' : 'songs'} · {allArtists.length} {allArtists.length === 1 ? 'artist' : 'artists'} · {allAlbumsCount} {allAlbumsCount === 1 ? 'album' : 'albums'} · {formatDuration(totalDuration)}
+        <div data-home-stats style={{ fontSize: 11, color: 'var(--text-secondary)', opacity: 0.6, letterSpacing: '0.04em', paddingLeft: 2 }}>
+          {decadeFilter === null
+            ? <>{library.length} {library.length === 1 ? 'song' : 'songs'} · {allArtists.length} {allArtists.length === 1 ? 'artist' : 'artists'} · {allAlbumsCount} {allAlbumsCount === 1 ? 'album' : 'albums'} · {formatDuration(totalDuration)}</>
+            : <>{filteredLibrary.length} {filteredLibrary.length === 1 ? 'song' : 'songs'} from the {decadeLabel(decadeFilter)} · {artists.length} {artists.length === 1 ? 'artist' : 'artists'} · {albums.length} {albums.length === 1 ? 'album' : 'albums'} · {formatDuration(filteredDuration)}</>}
         </div>
       </div>
 

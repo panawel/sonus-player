@@ -40,6 +40,7 @@ export default function TrackList({
   extraColumns = null,          // Library-only: LIBRARY_EXTRA_COLUMNS slice, see trackUtils.js / TrackRow.jsx
   initialOffset = 0,          // restored scroll position (Details view)
   emptyState = null,          // replaces the default "No tracks found." block
+  highlight = null,           // the Library search's words, lit in each row (TrackRow)
   bottomPadding = 0,          // extra space after the last row (e.g. clearance for the floating player pill) — see the comment on paddingEnd below for why this can't just be CSS padding on the scroll container
 }) {
   const containerRef = useRef(null);
@@ -202,6 +203,7 @@ export default function TrackList({
       leading,
       showAlbum,
       extraColumns,
+      highlight,
       onRowClick: selection.handleRowClick,
       onRowDoubleClick: handleRowDoubleClick,
       onPlayToggle: handlePlayToggle,

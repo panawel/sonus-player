@@ -15,7 +15,7 @@ describe('fileMenuTemplate', () => {
   const labels = tpl.filter((t) => t.label).map((t) => t.label);
 
   it('has exactly the agreed items, in order, ending with the Close Window role', () => {
-    expect(labels).toEqual(['Add Music…', 'Filled Screen Mode', 'Narrow Mode', 'Mini Mode', 'Chill Mode']);
+    expect(labels).toEqual(['Add Music…', 'Filled Screen Mode', 'Narrow Mode', 'Mini Mode', 'Strip Mode', 'Chill Mode']);
     expect(tpl[tpl.length - 1]).toEqual({ role: 'close' });
   });
 
@@ -30,11 +30,12 @@ describe('fileMenuTemplate', () => {
     tpl.find((t) => t.id === 'file-filled').click();
     tpl.find((t) => t.id === 'file-narrow').click();
     tpl.find((t) => t.id === 'file-mini').click();
-    expect(setWindowMode.mock.calls.map((c) => c[0])).toEqual(['filled', 'narrow', 'mini']);
+    tpl.find((t) => t.id === 'file-strip').click();
+    expect(setWindowMode.mock.calls.map((c) => c[0])).toEqual(['filled', 'narrow', 'mini', 'strip']);
   });
 
   it('each size item also tells the renderer to end Chill mode; Chill Mode itself does not', () => {
-    for (const id of ['file-filled', 'file-narrow', 'file-mini']) {
+    for (const id of ['file-filled', 'file-narrow', 'file-mini', 'file-strip']) {
       send.mockClear();
       tpl.find((t) => t.id === id).click();
       expect(send).toHaveBeenCalledWith('exit-chill');

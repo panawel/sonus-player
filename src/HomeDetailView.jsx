@@ -131,12 +131,13 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
 
   const innerScrollRef = useRef(null);
 
-  // Report this page's full track list upward, so the search panel (App.jsx /
-  // SearchPanel.jsx) can scope itself to this page.
+  // Report this page's full track list upward (optional; nothing uses it since search moved into
+  // the Library's own column header — the floating search panel that scoped itself to this page
+  // is gone).
   useEffect(() => { onTracksChange?.(tracks); }, [tracks, onTracksChange]);
 
-  // The search panel's text (App.jsx / SearchPanel.jsx) live-filters THIS
-  // page's tracks. Only the list is filtered: everything describing the page
+  // A search text (`searchQuery`, '' since search became the Library's own field, so this is
+  // dormant) live-filters THIS page's tracks. Only the list is filtered: everything describing the page
   // itself — the track count and duration in the subtitle, the hero artwork,
   // whether Play/Shuffle are enabled — keeps reading from the full `tracks`.
   const searching = searchQuery.trim() !== '';

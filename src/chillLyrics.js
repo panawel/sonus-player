@@ -33,8 +33,8 @@ export const LYRIC_TYPING = {
 
 // Embedded lyrics are sometimes LRC (timestamped): "[00:12.34]text" and "[ar:Artist]" tags. We
 // don't sync, so only the words are kept.
-const LRC_TIME = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/g;
-const LRC_META = /^\s*\[[a-z]{2,6}:[^\]]*\]\s*$/i;
+export const LRC_TIME = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/g;
+export const LRC_META = /^\s*\[[a-z]{2,6}:[^\]]*\]\s*$/i;
 
 export function parseLyrics(text) {
   if (typeof text !== 'string' || !text.trim()) return null;

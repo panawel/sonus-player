@@ -1,55 +1,22 @@
 import { useRef } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, Music, MoreVertical } from 'lucide-react';
+import ColourLayers from './ColourLayers.jsx';
+import { MoreVertical } from 'lucide-react';
 import cx from 'classnames';
 import usePillPhase from './usePillPhase';
 
-// Row height is sized to hug its tallest child (the skip buttons' 36px hit
-// circle, see the .player-pill .player-control-button padding override in
-// index.css) rather than leaving generous breathing room around it — the
-// user explicitly asked for "as thin as possible" while keeping every
-// icon/artwork/text element the same visual size, so the flattening comes
-// entirely from trimming chrome padding, not shrinking content.
-// Every size below (row height, icon/artwork sizes, fonts, paddings) is the
-// previous round's value scaled by the same ~1.15 factor (PILL_HEIGHT
-// 40->46 is the exact ratio the rest were rounded against) — a user request
-// for "a little bit bigger, same proportions, same design" specifically, not
-// a redesign, so nothing here changed shape, just uniform scale. Position
-// (PLAYER_PILL_BOTTOM_MARGIN) moved separately, per the same request's "a
-// little bit higher" — it's not a size and isn't part of this scale factor.
-const PILL_ROW_HEIGHT = 46;
-// The seek line now has a row of its own under the controls (elapsed — line —
-// remaining, like the mini player) instead of a thin strip along the pill's
-// very bottom edge, which ran into the rounded corners.
-const SEEK_ROW_HEIGHT = 26;
-export const PLAYER_PILL_TOTAL_HEIGHT = PILL_ROW_HEIGHT + SEEK_ROW_HEIGHT;
-export const PLAYER_PILL_BOTTOM_MARGIN = 18;
-
-// Concentric corners. The pill is a soft rounded rectangle (PILL_RADIUS), not
-// a full capsule (9999): with a capsule, the artwork inside needed some
-// unrelated small radius and the two curves visibly disagreed. The artwork now
-// sits ROW_INSET from the pill's top, bottom and left edges, so its radius is
-// PILL_RADIUS - border - ROW_INSET — one curve, offset, which is what
-// "matching radii" means geometrically.
-export const PILL_RADIUS = 18;
-const ROW_INSET = 5;
-const ARTWORK_SIZE = PILL_ROW_HEIGHT - 2 * ROW_INSET;
-// - 1: the pill's 1px border, which the artwork's inset is measured inside of.
-const ARTWORK_RADIUS = PILL_RADIUS - 1 - ROW_INSET;
-
-// Side padding of the seek row. The bottom corners curve with PILL_RADIUS; the
-// line sits ~13px above the bottom edge, where that curve has moved in only
-// ~1px, so 16px of padding leaves it comfortably clear of the curve.
-const SEEK_ROW_INSET = 16;
-
-const PLAY_PAUSE_SIZE = 41;
-const CONTROL_ICON_SIZE = 23;
-const SECONDARY_ICON_SIZE = 18;
-const PLAY_PAUSE_ICON_SIZE = 21;
-
-const HOLD_RING_SIZE = PLAY_PAUSE_SIZE + 9;
-const HOLD_RING_RADIUS = HOLD_RING_SIZE / 2 - 2;
-const HOLD_RING_CIRCUMFERENCE = 2 * Math.PI * HOLD_RING_RADIUS;
-const HOLD_RING_OFFSET = (HOLD_RING_SIZE - PLAY_PAUSE_SIZE) / 2;
+// The floating player on Home, the Library and detail pages is Chill mode's bar, made the same
+// way (ChillScene.jsx's `.chill-bar`): the same width (min(640px, 100% - 48px)), place (22px from
+// the bottom, centred), corner radius, padding, text sizes, the same shared transport controls
+// (App.jsx's renderTransportControls with Chill's sizes, passed in as `renderTransport`), the same ⋮
+// and the same seek row with both times — no cover. What only this one has: the song's colour
+// tinting its glass (and a soft glow around it), a click on its empty area opening Now Playing,
+// and its bubble in / out. The geometry is shared CSS (`.player-pill--bar` + `.chill-bar`, see
+// index.css) and the smoke suite compares the two bars, so they cannot drift apart.
+// The bar's outer height (measured 86px), rounded up: the lists keep this much room under their
+// last row (App.jsx's PLAYER_PILL_CLEARANCE), and the smoke suite checks the last row clears it.
+export const PLAYER_PILL_TOTAL_HEIGHT = 92;
+export const PLAYER_PILL_BOTTOM_MARGIN = 22;
+export const PILL_RADIUS = 20;
 
 // How much of the artwork's average color tints the glass — see
 // tintAlphaForLuminance below for why this is a ceiling, not a flat value.
@@ -86,12 +53,8 @@ function tintAlphaForLuminance(r, g, b) {
 // content genuinely differs — they share the bubble-animation logic
 // (usePillPhase) and the .player-pill/.player-pill-wrapper CSS instead.
 export default function PlayerPill({
-  currentTrack, isNowPlayingOpen, isPlaying,
+  currentTrack, isNowPlayingOpen,
   currentTime, duration, isSeeking, seekValue, isSeekHovered, hoverTime,
-  isShuffle, onToggleShuffle, repeatMode, onToggleRepeat,
-  isHoldingPlayPause,
-  playPrev, playNext,
-  onPlayPauseClick, onPlayPausePressStart, onPlayPausePressEnd,
   playerArtistTokens,
   playerTitleWrapRef, playerSubtitleWrapRef,
   playerTitleDist, playerSubtitleDist, playerTitleDuration, playerSubtitleDuration,
@@ -103,6 +66,7 @@ export default function PlayerPill({
   formatTime,
   onExpandCollapseNP,
   artworkRgb,
+  renderTransport,
 }) {
   const wrapperRef = useRef(null);
   const seekTrackRef = useRef(null);
@@ -158,15 +122,15 @@ export default function PlayerPill({
           capsule below (not z-indexed — plain source order is enough inside
           this wrapper's own stacking context) so it paints behind it. Fades
           in/out with the wrapper's own opacity automatically; no separate
-          animation needed. */}
-      {artworkRgb && (
-        <div style={{
-          position: 'absolute', inset: '-41px', borderRadius: 9999,
-          background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, 0.35)`,
-          filter: 'blur(44px)', transition: 'background 1s ease',
-          pointerEvents: 'none', zIndex: 0,
-        }} />
-      )}
+          animation needed. Half the strength it had over the old see-through glass (0.35): the
+          pages now sit on the song's own colours, where the full halo was too much. A new
+          song's colour CROSSFADES in (ColourLayers), never as a `background` transition, which
+          repainted this whole blurred layer on every frame for a second on every skip. */}
+      <ColourLayers rgb={artworkRgb} fadeMs={1000} className="player-pill-halo" layerStyle={({ r, g, b }) => ({
+        position: 'absolute', inset: '-41px', borderRadius: 9999,
+        background: `rgba(${r}, ${g}, ${b}, 0.175)`,
+        filter: 'blur(44px)', zIndex: 0,
+      })} />
 
       {/* Hover/scrub time tooltip — a sibling of the clipped capsule below (not
           a child of it), so its `bottom: calc(100% + ...)` position isn't cut
@@ -192,53 +156,28 @@ export default function PlayerPill({
       )}
 
       <div
-        className="player-pill clickable"
+        className="player-pill player-pill--bar clickable"
+        data-player-bar
         onClick={onExpandCollapseNP}
-        style={{
-          position: 'relative', zIndex: 1,
-          display: 'flex', flexDirection: 'column',
-          width: 'min(644px, calc(100vw - 48px))',
-          borderRadius: PILL_RADIUS,
-          overflow: 'hidden',
-          cursor: 'default',
-          pointerEvents: phase === 'exiting' ? 'none' : 'auto',
-        }}
+        style={{ position: 'relative', zIndex: 1, cursor: 'default', pointerEvents: phase === 'exiting' ? 'none' : 'auto' }}
       >
-        {/* Artwork-color tint — a plain absolutely-positioned layer behind the
-            row content (not the capsule's own `background`, so the fallback
-            white glass underneath always shows through at whatever the tint
-            doesn't cover), alpha pre-clamped by tintAlphaForLuminance so a
-            dark cover can't darken this into the icon-legibility problem
-            artwork tinting caused the last time it was tried (see the
-            function's own comment). Absent entirely when there's no artwork. */}
-        {tintAlpha > 0 && (
-          <div style={{
-            position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
-            background: `rgba(${artworkRgb.r}, ${artworkRgb.g}, ${artworkRgb.b}, ${tintAlpha})`,
-            transition: 'background 1s ease',
-          }} />
-        )}
+        {/* The song's colour tinting the glass, alpha clamped by tintAlphaForLuminance so a light
+            cover can't wash the white icons out; crossfaded (ColourLayers), never a `background`
+            transition. Rounded with the bar (it is clipped to it). */}
+        <ColourLayers rgb={tintAlpha > 0 ? artworkRgb : null} fadeMs={1000} className="player-bar-tint" layerStyle={({ r, g, b }) => ({
+          position: 'absolute', inset: 0, zIndex: 0, borderRadius: 'inherit',
+          background: `rgba(${r}, ${g}, ${b}, ${tintAlphaForLuminance(r, g, b)})`,
+        })} />
 
-        {/* Main row: artwork, title/artist, the five transport controls, menu.
-            The artwork leads the row (it used to sit between the controls and
-            the title, which read as arbitrary) at an equal ROW_INSET from the
-            pill's top, bottom and left edges, so its corner radius
-            (ARTWORK_RADIUS) is exactly concentric with the pill's own. */}
-        <div style={{ position: 'relative', zIndex: 1, height: PILL_ROW_HEIGHT, display: 'flex', alignItems: 'center', gap: 10, padding: `0 9px 0 ${ROW_INSET}px` }}>
-          <div
-            className="player-artwork"
-            style={{ width: ARTWORK_SIZE, height: ARTWORK_SIZE, borderRadius: ARTWORK_RADIUS, background: 'rgba(0,0,0,0.06)', overflow: 'hidden', flexShrink: 0, cursor: 'pointer' }}
-          >
-            {track?.thumb ? <img src={track.thumb} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={18} style={{ margin: (ARTWORK_SIZE - 18) / 2 }} color="var(--text-secondary)" />}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0, flex: 1 }}>
-            <div ref={playerTitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontWeight: 700, fontSize: 15, color: 'var(--chrome-text)', lineHeight: 1.3, WebkitMaskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined }}>
+        {/* Chill's top row: title / artist, the controls, ⋮ */}
+        <div className="chill-bar-top" style={{ position: 'relative', zIndex: 1 }}>
+          <div className="chill-meta">
+            <div ref={playerTitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontWeight: 700, fontSize: 16, color: 'var(--chrome-text)', lineHeight: 1.3, WebkitMaskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerTitleDist > 0 ? marqueeFadeMask : undefined }}>
               <span className={playerTitleDist > 0 ? 'marquee-scroll' : undefined} style={{ display: 'inline-block', '--marquee-distance': `${playerTitleDist}px`, '--marquee-duration': playerTitleDuration }}>
                 {track?.title}
               </span>
             </div>
-            <div ref={playerSubtitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontSize: 13, color: 'var(--chrome-text-dim)', lineHeight: 1.3, WebkitMaskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined }}>
+            <div ref={playerSubtitleWrapRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', width: '100%', fontSize: 14, color: 'var(--chrome-text-dim)', lineHeight: 1.3, WebkitMaskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined, maskImage: playerSubtitleDist > 0 ? marqueeFadeMask : undefined }}>
               <span className={playerSubtitleDist > 0 ? 'marquee-scroll' : undefined} style={{ display: 'inline-block', '--marquee-distance': `${playerSubtitleDist}px`, '--marquee-duration': playerSubtitleDuration }}>
                 {playerArtistTokens.map((token, i) => (
                   <span key={`${i}:${token}`}>
@@ -249,73 +188,21 @@ export default function PlayerPill({
               </span>
             </div>
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-            <button className={cx('player-control-button player-toggle clickable', { 'player-toggle--on': isShuffle })} aria-pressed={isShuffle} aria-label="Shuffle" style={{ color: isShuffle ? 'var(--chrome-text)' : 'var(--chrome-text-off)' }} onClick={(e) => { e.stopPropagation(); onToggleShuffle(); }}>
-              <Shuffle size={SECONDARY_ICON_SIZE} />
-            </button>
-            <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
-              <SkipBack size={CONTROL_ICON_SIZE} fill="currentColor" />
-            </button>
-            <button
-              className={cx('clickable play-pause-btn', { 'play-pause-btn--playing': isPlaying })}
-              style={{ width: PLAY_PAUSE_SIZE, height: PLAY_PAUSE_SIZE, color: 'var(--chrome-text)', flexShrink: 0, position: 'relative' }}
-              onClick={(e) => { e.stopPropagation(); onPlayPauseClick(e); }}
-              onMouseDown={onPlayPausePressStart}
-              onMouseUp={onPlayPausePressEnd}
-              onMouseLeave={onPlayPausePressEnd}
-              onTouchStart={onPlayPausePressStart}
-              onTouchEnd={onPlayPausePressEnd}
-            >
-              {isHoldingPlayPause && (
-                <svg width={HOLD_RING_SIZE} height={HOLD_RING_SIZE} viewBox={`0 0 ${HOLD_RING_SIZE} ${HOLD_RING_SIZE}`} style={{ position: 'absolute', top: -HOLD_RING_OFFSET, left: -HOLD_RING_OFFSET, pointerEvents: 'none' }}>
-                  <circle
-                    cx={HOLD_RING_SIZE / 2} cy={HOLD_RING_SIZE / 2} r={HOLD_RING_RADIUS}
-                    fill="none"
-                    stroke="#00f2fe"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeDasharray={HOLD_RING_CIRCUMFERENCE}
-                    strokeDashoffset={HOLD_RING_CIRCUMFERENCE}
-                    transform={`rotate(-90 ${HOLD_RING_SIZE / 2} ${HOLD_RING_SIZE / 2})`}
-                    className="hold-ring-circle"
-                  />
-                </svg>
-              )}
-              {isPlaying ? <Pause size={PLAY_PAUSE_ICON_SIZE} fill="currentColor" /> : <Play size={PLAY_PAUSE_ICON_SIZE} fill="currentColor" style={{ marginLeft: 1 }} />}
-            </button>
-            <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); playNext(false); }}>
-              <SkipForward size={CONTROL_ICON_SIZE} fill="currentColor" />
-            </button>
-            <button className={cx('player-control-button player-toggle clickable', { 'player-toggle--on': repeatMode !== 'off' })} aria-pressed={repeatMode !== 'off'} aria-label={`Repeat: ${repeatMode}`} style={{ color: repeatMode !== 'off' ? 'var(--chrome-text)' : 'var(--chrome-text-off)' }} onClick={(e) => { e.stopPropagation(); onToggleRepeat(); }}>
-              {repeatMode === 'one' ? <Repeat1 size={SECONDARY_ICON_SIZE} /> : <Repeat size={SECONDARY_ICON_SIZE} />}
-            </button>
-          </div>
-
+          <div className="chill-transport">{renderTransport()}</div>
           <button
-            className="player-control-button clickable"
+            className="player-control-button chill-menu-btn clickable"
             title="More"
             aria-label="More"
             data-pill-menu-btn
-            style={{ color: 'var(--chrome-text)', flexShrink: 0 }}
             onClick={(e) => { e.stopPropagation(); onOpenMenu(e); }}
           >
-            <MoreVertical size={21} />
+            <MoreVertical size={20} />
           </button>
         </div>
 
-        {/* Seek row: elapsed, the line, remaining — the same arrangement as the
-            mini player. It replaced a thin line along the pill's very bottom
-            edge, which ran into the rounded corners (the track's ends looked
-            clipped and pinched where they met the curve). Here the line is a
-            full row of its own with SEEK_ROW_INSET of side padding and a few
-            px under it, so it never gets near the curve. The input keeps the
-            app's tall invisible hit box (22px) around a 4px drawn line. */}
-        <div
-          style={{ position: 'relative', zIndex: 1, height: SEEK_ROW_HEIGHT, display: 'flex', alignItems: 'center', gap: 10, padding: `0 ${SEEK_ROW_INSET}px 3px`, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--chrome-text-dim)' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <span style={{ minWidth: 30 }}>{formatTime(shown)}</span>
+        {/* Chill's seek row: elapsed — the line — remaining (with this bar's scrub-time bubble) */}
+        <div className="chill-seek-row" style={{ position: 'relative', zIndex: 1 }} onClick={(e) => e.stopPropagation()}>
+          <span style={{ minWidth: 34 }}>{formatTime(shown)}</span>
           <div
             ref={seekTrackRef}
             style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}
@@ -335,11 +222,11 @@ export default function PlayerPill({
               onTouchStart={onSeekMouseDown}
               onTouchEnd={onSeekMouseUp}
               onClick={(e) => e.stopPropagation()}
-              className={cx('clickable pill-seek-bar', { 'pill-seek-bar--hovered': isSeekHovered || isSeeking })}
-              style={{ '--progress': `${progressPct}%` }}
+              className="clickable mini-seek-bar chill-seek-bar"
+              style={{ flex: 1, '--progress': `${progressPct}%` }}
             />
           </div>
-          <span style={{ minWidth: 34, textAlign: 'right' }}>-{formatTime(remaining)}</span>
+          <span style={{ minWidth: 40, textAlign: 'right' }}>-{formatTime(remaining)}</span>
         </div>
       </div>
     </div>

@@ -149,6 +149,16 @@ export function useMix(item, library) {
   return { ...state, retry: run };
 }
 
+// The session (App.jsx) keeps an open Mix's songs, so a relaunch shows the same mix without
+// asking the internet again: it reads them here on save and puts them back on launch.
+const mixKey = (seedTrack) => `${(seedTrack.artist || '').toLowerCase()}::${(seedTrack.title || '').toLowerCase()}`;
+export function getCachedMix(seedTrack) {
+  return seedTrack ? mixCache.get(mixKey(seedTrack)) ?? null : null;
+}
+export function seedMixCache(seedTrack, tracks) {
+  if (seedTrack) mixCache.set(mixKey(seedTrack), tracks);
+}
+
 // Test-only escape hatch (mirrors window.__sonusTagEditorTest.openSearchResults)
 // — lets the smoke suite seed the in-memory cache directly, so it can drive
 // every Mix UI state without ever making a real network call.

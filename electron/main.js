@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, clipboar
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
+import fsSync from 'fs';
+import { sanitizeSession, launchPlan } from './session.mjs';
 import crypto from 'crypto';
 import * as mm from 'music-metadata';
 import NodeID3 from 'node-id3';
@@ -15,7 +17,7 @@ import { expandToFiles } from './folderScan.mjs';
 import { createPointerTracker } from './pointerTracker.mjs';
 import { createMotionTracker } from './pointerMotion.mjs';
 import { fileMenuTemplate, controlsMenuTemplate, applyMenuState } from './appMenu.mjs';
-import { modeBounds } from './windowModes.mjs';
+import { modeBounds, stripBounds, stripDropBounds, stripBoundsAt, clampStripPosition, MINI_MIN_HEIGHT, STRIP_RESIZE_MIN_HEIGHT } from './windowModes.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,7 +38,55 @@ if (SMOKE) {
   app.setPath('userData', path.join(app.getPath('temp'), `sonus-smoke-${process.pid}`));
 }
 
+// The dev app (npm run dev) keeps its own data, in "Sonus Dev": it used to share the built app's
+// folder, so whichever of the two quit last decided the other's window size and session. Its first
+// launch starts from a copy of the built app's library, index, covers and session, so it isn't
+// empty. A --user-data-dir on the command line (the throwaway e2e profile) still wins.
+const DEV_DATA_FILES = ['library.json', 'library-index.json', 'play-stats.json', 'session.json', 'strip-state.json', 'window-state.json', 'thumbs', 'Local Storage'];
+if (!app.isPackaged && !SMOKE && !app.commandLine.hasSwitch('user-data-dir')) {
+  const realDir = path.join(app.getPath('appData'), 'Sonus');
+  const devDir = path.join(app.getPath('appData'), 'Sonus Dev');
+  if (!fsSync.existsSync(devDir) && fsSync.existsSync(realDir)) {
+    try {
+      fsSync.mkdirSync(devDir, { recursive: true });
+      for (const name of DEV_DATA_FILES) {
+        const from = path.join(realDir, name);
+        if (fsSync.existsSync(from)) fsSync.cpSync(from, path.join(devDir, name), { recursive: true });
+      }
+    } catch (err) { console.error('Could not copy the app data for the dev app:', err); }
+  }
+  app.setPath('userData', devDir);
+}
+
 const libraryStatePath = () => path.join(app.getPath('userData'), 'library.json');
+
+// The session (session.mjs): how the app was when it quit, beyond the library list. The renderer
+// sends its part ('session:save', and 'session:save-sync' as the window closes); main adds whether
+// the strip was open, and writes the two together. Read synchronously: it's small, and launch
+// needs it before the main window exists (to keep it hidden when the strip comes back instead).
+const sessionPath = () => path.join(app.getPath('userData'), 'session.json');
+function readSessionSync() {
+  try { return sanitizeSession(JSON.parse(fsSync.readFileSync(sessionPath(), 'utf8'))); } catch { return sanitizeSession(null); }
+}
+let rendererSession = null; // the renderer's last report (until then, what was on disk)
+let sessionStripOpen = false;
+const sessionToWrite = () => JSON.stringify({ ...(rendererSession || {}), stripOpen: sessionStripOpen });
+function writeSessionSync() {
+  try { fsSync.writeFileSync(sessionPath(), sessionToWrite()); } catch (err) { console.error('Failed to save the session:', err); }
+}
+ipcMain.on('session:save', (event, state) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || !state || typeof state !== 'object') return;
+  rendererSession = state;
+  fs.writeFile(sessionPath(), sessionToWrite()).catch(err => console.error('Failed to save the session:', err));
+});
+// The window is closing (quit): written before this returns, so nothing is lost to the exit.
+ipcMain.on('session:save-sync', (event, state) => {
+  if (mainWindow && event.sender === mainWindow.webContents && state && typeof state === 'object') {
+    rendererSession = state;
+    writeSessionSync();
+  }
+  event.returnValue = true;
+});
 const thumbsDir = () => path.join(app.getPath('userData'), 'thumbs');
 
 // Metadata index (parsed tags per file, keyed by path+mtime) + play stats.
@@ -176,6 +226,12 @@ async function waitForBatchSettle() {
 // hidden window with nothing shown would look like nothing happened.
 function revealWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  // Strip mode: the strip IS the player (the hidden main window only plays the music), so an
+  // opened song shows there. Showing the main window too put two players on screen at once.
+  if (stripWindow && !stripWindow.isDestroyed()) {
+    if (!stripWindow.isVisible()) stripWindow.showInactive();
+    return;
+  }
   if (mainWindow.isMinimized()) mainWindow.restore();
   if (!mainWindow.isVisible()) mainWindow.show();
   mainWindow.focus();
@@ -259,6 +315,12 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.on('before-quit', (event) => {
+  // Remembered first, while the strip still exists: quitting closes it before the main window,
+  // so by the time the main window's close handler runs it would always read "no strip".
+  if (!forceQuit && stripWindow) {
+    sessionStripOpen = true;
+    writeSessionSync();
+  }
   forceQuit = true;
   // Flush any debounced index/stats writes before the process dies.
   if (!storeFlushed && store) {
@@ -273,10 +335,17 @@ app.on('open-file', (event, filePath) => {
   queueOpenFilePath(filePath);
 });
 
+let smokeStarted = false;
 function createWindow() {
   rendererReady = false;
   libraryLoadServed = false;
-  let mainWindowState = windowStateKeeper({
+  const savedSession = readSessionSync();
+  rendererSession = { ...savedSession };
+  delete rendererSession.stripOpen;
+  // Quit from the strip: it comes back, and the main window stays hidden behind it (it still
+  // loads and plays: the strip is only a remote for it).
+  let reopenStrip = launchPlan(savedSession, { smoke: SMOKE }).openStrip;
+  const mainWindowState = windowStateKeeper({
     defaultWidth: 1000,
     defaultHeight: 700
   });
@@ -285,13 +354,17 @@ function createWindow() {
     x: mainWindowState.x,
     y: mainWindowState.y,
     width: mainWindowState.width,
-    height: mainWindowState.height,
+    // Never open shorter than the mini player's own minimum: a window saved shorter than that
+    // (it was being shrunk into the strip) would open as a lifeless strip preview.
+    height: Math.max(mainWindowState.height, MINI_MIN_HEIGHT),
     minWidth: 380,
-    // 180 is the shortest the mini player (MiniPlayer.jsx, shown below
-    // MINI_LAYOUT_HEIGHT_BREAKPOINT in trackUtils.js) fits its content in.
+    // 180 (MINI_MIN_HEIGHT) is the shortest the mini player (MiniPlayer.jsx, shown below
+    // MINI_LAYOUT_HEIGHT_BREAKPOINT in trackUtils.js) fits its content in. The window may go
+    // shorter, to STRIP_RESIZE_MIN_HEIGHT: below 180 the page previews the strip, and letting go
+    // there turns it into Strip mode (the 'resized' handler below).
     // Everything between that and the old 600 floor is mini or a layout that
     // used to be unreachable — see docs/ARCHITECTURE.md's "Mini player".
-    minHeight: 180,
+    minHeight: STRIP_RESIZE_MIN_HEIGHT,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -303,7 +376,8 @@ function createWindow() {
     visualEffectState: 'active',
     titleBarStyle: 'hiddenInset',
     transparent: true,
-    backgroundColor: '#00000000'
+    backgroundColor: '#00000000',
+    show: !reopenStrip,
   });
 
   if (app.isPackaged || SMOKE) {
@@ -314,19 +388,30 @@ function createWindow() {
 
   mainWindow.webContents.on('did-finish-load', () => {
     rendererReady = true;
+    // A reload forgets everything: tell the page again whether the strip is up.
+    mainWindow.webContents.send('window:strip-mode', !!stripWindow);
+    if (reopenStrip) {
+      reopenStrip = false;
+      enterStripMode();
+    }
     // No longer clears the settle timer: that timer is what resolves the batch
     // for library:load, and flushOpenFiles is idempotent on an empty batch.
     flushOpenFiles();
     // Safety net - if the renderer never asks for its library (broken preload,
     // load failure), a pending batch must not be stranded forever.
     setTimeout(() => { libraryLoadServed = true; flushOpenFiles(); }, 3000);
-    if (SMOKE) {
+    // (once: the session section reloads the page to restore from what it saved)
+    if (SMOKE && !smokeStarted) {
+      smokeStarted = true;
       import('./smokeTest.mjs')
         .then(m => m.runSmoke({
           mainWindow, parseFilePaths, getStore, loadLibraryState, seedOpenFileBatch,
           getOpenFileFlushCount: () => openFileFlushCount,
           openTagEditor: createTagEditorWindow,
           getTagEditorWindow: () => tagEditorWindow,
+          getStripWindow: () => stripWindow,
+          prepareMainForQuit: () => prepareMainForQuit(mainWindowState),
+          readSession: () => readSessionSync(),
         }))
         .catch(err => { console.log('SMOKE_RESULT:' + JSON.stringify({ ok: false, failures: [String(err)] })); app.exit(1); });
     }
@@ -334,7 +419,18 @@ function createWindow() {
 
   mainWindowState.manage(mainWindow);
 
+  // Shrinking the mini player below its minimum turns it into the strip, where the window was
+  // ('resized' comes once, when the user lets go; a window dragged back up before that stays).
+  mainWindow.on('resized', () => {
+    if (stripWindow || mainWindow.isFullScreen()) return;
+    if (mainWindow.getContentSize()[1] < MINI_MIN_HEIGHT) enterStripMode({ at: mainWindow.getBounds() });
+  });
+
   mainWindow.on('close', (event) => {
+    // Quitting from Strip mode: the main window is hidden at whatever size it had, which after
+    // shrinking the mini player into the strip is below the mini player's minimum. Put it back
+    // first, so that is what is remembered and reopened.
+    if (forceQuit || process.platform !== 'darwin') prepareMainForQuit(mainWindowState);
     if (process.platform === 'darwin' && !forceQuit) {
       event.preventDefault();
       mainWindow.hide();
@@ -486,6 +582,12 @@ ipcMain.on('tag-editor:resize', (event, contentHeight) => {
 // main window, even when the Tag Editor window is the one with focus.
 function sendMenuCommand(command) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  // In strip mode the player controls work on the strip; only what needs the app comes back.
+  if (stripWindow && command !== 'add-music' && command !== 'go-to-current') {
+    mainWindow.webContents.send('menu-command', command);
+    return;
+  }
+  if (stripWindow) exitStripMode();
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -499,6 +601,8 @@ function sendMenuCommand(command) {
 function applyWindowMode(mode) {
   const win = mainWindow;
   if (!win || win.isDestroyed()) return;
+  if (mode === 'strip') { enterStripMode(); return; }
+  if (stripWindow) exitStripMode(); // back to the normal window first, then resize it
   const apply = () => {
     if (win.isDestroyed()) return;
     const cur = win.getBounds();
@@ -512,6 +616,156 @@ function applyWindowMode(mode) {
   }
   apply();
 }
+
+// File > Strip Mode: an ultra-slim player in the free band beside the macOS Dock.
+// It is its OWN small window (StripApp.jsx, ?strip=1), not the main window made small: macOS
+// keeps every window with a title bar out of the Dock's band (even 'hiddenInset': its title
+// zone must stay in the visible frame, and show() pushes the whole window above the Dock), and
+// only a frameless window with enableLargerThanScreen is left where it is put (measured on this
+// Mac: y 1066 in a 51px band, through show, hide+show, setPosition and focus).
+// Meanwhile the main window is hidden but keeps playing (the <audio> lives there), with
+// background throttling off so its reports stay steady: it sends 'strip:state', which goes on to
+// the strip, and the strip's 'strip:command's go back to it. Leaving closes the strip and shows
+// the main window again exactly as it was (it was only hidden).
+let stripWindow = null;
+let stripLastState = null; // the main window's last report, for a strip window that just loaded
+const stripStatePath = () => path.join(app.getPath('userData'), 'strip-state.json');
+let stripPositions = null; // { [displayId]: { x, y, inBand } } — where the user last left the strip
+async function loadStripPositions() {
+  if (stripPositions) return stripPositions;
+  try { stripPositions = JSON.parse(await fs.readFile(stripStatePath(), 'utf8')) || {}; } catch { stripPositions = {}; }
+  return stripPositions;
+}
+function saveStripPosition(display, saved) {
+  stripPositions = { ...(stripPositions || {}), [display.id]: saved };
+  fs.writeFile(stripStatePath(), JSON.stringify(stripPositions)).catch(() => {});
+}
+let stripEntering = false;
+// at: entered by shrinking the window — the strip goes where the window was, and leaving it
+// brings back the mini player at its minimum size there.
+let stripRestoreBounds = null;
+async function enterStripMode({ at = null } = {}) {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || stripWindow || stripEntering) return;
+  if (win.isFullScreen()) {
+    win.once('leave-full-screen', () => setTimeout(() => enterStripMode({ at }), 100));
+    win.setFullScreen(false);
+    return;
+  }
+  stripEntering = true;
+  const positions = await loadStripPositions();
+  stripEntering = false;
+  if (stripWindow || win.isDestroyed()) return;
+  const display = screen.getDisplayMatching(win.getBounds());
+  let bounds = stripBounds(display, positions[display.id] ?? null);
+  stripRestoreBounds = null;
+  if (at) {
+    const placed = stripBoundsAt(display, at);
+    bounds = placed.bounds;
+    saveStripPosition(display, placed.saved);
+    const frameExtra = at.height - win.getContentSize()[1]; // 0 with hiddenInset, kept honest anyway
+    stripRestoreBounds = { ...at, height: MINI_MIN_HEIGHT + frameExtra };
+  }
+  const strip = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    enableLargerThanScreen: true, // without it macOS moves the window out of the Dock's band
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false, // the capsule draws its own, following its shape
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    acceptFirstMouse: true, // a click on the strip acts at once, even when another app is in front
+    show: false,
+    title: 'Sonus',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: false, // the cover is a sonus-thumb:// or file:// image, like the main window's
+      backgroundThrottling: !SMOKE,
+    },
+  });
+  stripWindow = strip;
+  strip.setAlwaysOnTop(true, 'floating');
+  if (app.isPackaged || SMOKE) {
+    strip.loadFile(path.join(__dirname, '../dist/index.html'), { query: SMOKE ? { strip: '1', test: '1' } : { strip: '1' } });
+  } else {
+    strip.loadURL('http://localhost:5173?strip=1');
+  }
+  strip.once('ready-to-show', () => {
+    if (strip.isDestroyed() || stripWindow !== strip) return;
+    strip.show();
+    if (!win.isDestroyed()) win.hide();
+  });
+  // Cmd+W on the strip, or anything else that closes it, is leaving strip mode.
+  strip.on('closed', () => {
+    if (stripWindow !== strip) return;
+    stripWindow = null;
+    restoreMainFromStrip();
+  });
+  win.webContents.setBackgroundThrottling(false);
+  win.webContents.send('window:strip-mode', true);
+}
+function restoreMainFromStrip() {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  win.webContents.setBackgroundThrottling(!SMOKE);
+  win.webContents.send('window:strip-mode', false);
+  const restore = stripRestoreBounds;
+  stripRestoreBounds = null;
+  if (restore) win.setBounds(restore, false); // shrunk into the strip: back to the mini player
+  if (forceQuit) return; // quitting: nothing to show
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+// Before the main window's size is saved on quit: leave Strip mode (which restores the mini
+// player's size), and never save a window shorter than the mini player's minimum.
+function prepareMainForQuit(windowState) {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  // Remembered for the next launch, which reopens the strip if it was open now. (Quitting has
+  // usually closed the strip already by now: before-quit records it first. Never reset it here.)
+  if (stripWindow) sessionStripOpen = true;
+  writeSessionSync();
+  if (stripWindow) exitStripMode();
+  const [w, h] = win.getContentSize();
+  if (h < MINI_MIN_HEIGHT) win.setContentSize(w, MINI_MIN_HEIGHT, false);
+  windowState?.saveState(win);
+}
+function exitStripMode() {
+  const strip = stripWindow;
+  if (!strip) return;
+  stripWindow = null;
+  if (!strip.isDestroyed()) strip.destroy();
+  restoreMainFromStrip();
+}
+// The Dock moved or resized, autohide changed, a display went away: put the strip back on the
+// spot remembered for the display it's on now (kept whole on screen; the default spot if none).
+function refitStripWindow() {
+  if (!stripWindow || stripWindow.isDestroyed()) return;
+  const display = screen.getDisplayMatching(stripWindow.getBounds());
+  stripWindow.setBounds(stripBounds(display, stripPositions?.[display.id] ?? null), false);
+}
+ipcMain.on('window:strip-exit', () => exitStripMode());
+// The top bar's Chill tab, tapped in a narrow window (Chill mode needs a wide one): the same as
+// File > Chill Mode — fill the screen, then the page opens Now Playing in Chill mode.
+ipcMain.on('window:enter-chill', () => enterChillMode());
+ipcMain.handle('window:get-strip-mode', () => !!stripWindow);
+ipcMain.on('strip:state', (event, state) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
+  stripLastState = state;
+  if (stripWindow && !stripWindow.isDestroyed()) stripWindow.webContents.send('strip:state', state);
+});
+ipcMain.handle('strip:get-state', () => stripLastState);
+ipcMain.on('strip:command', (event, command) => {
+  if (!stripWindow || event.sender !== stripWindow.webContents) return;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('strip:command', command);
+});
 
 // File > Chill Mode: fill the screen, then ask the renderer to open Now Playing
 // in Chill mode. Already in native full screen (View > Enter Full Screen), the
@@ -623,6 +877,10 @@ app.whenReady().then(async () => {
     app.dock.setIcon(path.join(__dirname, '../build/icon.png'));
   }
 
+  // Strip mode: keep the strip in the Dock's band when the Dock or the displays change.
+  screen.on('display-metrics-changed', refitStripWindow);
+  screen.on('display-removed', refitStripWindow);
+
   // Thumbnail protocol: sonus-thumb://art/<sha1(filePath)>.<ext>?v=<contentHash>
   // The ?v= query busts the renderer's HTTP cache when artwork changes; the
   // handler itself only looks at the file name.
@@ -675,6 +933,10 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+    } else if (stripWindow) {
+      // Clicking Sonus in the Dock while the strip is up leaves it as it is: the full window
+      // comes back only from the strip's cover or Escape (or the File menu).
+      if (!stripWindow.isDestroyed() && !stripWindow.isVisible()) stripWindow.showInactive();
     } else if (mainWindow && !mainWindow.isVisible()) {
       mainWindow.show();
     }
@@ -683,6 +945,12 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
+    app.quit();
+  } else if (forceQuit) {
+    // Quitting with the main window hidden (always so in Strip mode; also after closing it with
+    // the red button or Cmd+W): Electron closes every window and then reports "all closed"
+    // instead of quitting, and the app stayed running with no window until a second Quit.
+    // The user asked to quit, and every close handler (saving included) has run: finish it.
     app.quit();
   }
 });
@@ -973,7 +1241,7 @@ async function resolveInitialLibrary() {
     if (opened.length > 0) {
       // autoPlay distinguishes this from a restored session, which deliberately
       // comes back paused at its saved position.
-      return { tracks: opened, currentTrackPath: opened[0].filePath, currentTime: 0, autoPlay: true, failedOpenCount: 0 };
+      return { tracks: opened, currentTrackPath: opened[0].filePath, currentTime: 0, autoPlay: true, failedOpenCount: 0, session: readSessionSync() };
     }
     // Every opened file was unreadable. Fall through to the saved session:
     // replacing a working library with nothing is never the right answer.
@@ -1001,20 +1269,31 @@ async function resolveInitialLibrary() {
       }, 250);
     }
 
+    // The session knows where in the song it was (library.json only saves when the song
+    // changes, so its own time is the start of the song).
+    const session = readSessionSync();
+    const currentTrackPath = saved?.currentTrackPath ?? null;
+    const libraryTime = typeof saved?.currentTime === 'number' ? saved.currentTime : 0;
     return {
       tracks,
-      currentTrackPath: saved?.currentTrackPath ?? null,
-      currentTime: typeof saved?.currentTime === 'number' ? saved.currentTime : 0,
+      currentTrackPath,
+      currentTime: session.currentTrackPath && session.currentTrackPath === currentTrackPath ? session.currentTime : libraryTime,
       autoPlay: false,
-      failedOpenCount
+      failedOpenCount,
+      session,
     };
   } catch {
-    return { tracks: [], currentTrackPath: null, currentTime: 0, autoPlay: false, failedOpenCount };
+    return { tracks: [], currentTrackPath: null, currentTime: 0, autoPlay: false, failedOpenCount, session: readSessionSync() };
   }
 }
 
 ipcMain.handle('library:load', loadLibraryState);
 
+// The window is closing (quit or reload): the debounced save above may not have run yet.
+ipcMain.on('library:save-sync', (event, state) => {
+  try { if (state && typeof state === 'object') fsSync.writeFileSync(libraryStatePath(), JSON.stringify(state)); } catch (err) { console.error('Failed to save library state:', err); }
+  event.returnValue = true;
+});
 ipcMain.on('library:save', (event, state) => {
   fs.writeFile(libraryStatePath(), JSON.stringify(state)).catch(err => {
     console.error('Failed to save library state:', err);
@@ -1122,8 +1401,22 @@ ipcMain.on('window:drag', (event, phase) => {
     const drag = windowDrags.get(win.id);
     if (!drag) return;
     const cursor = screen.getCursorScreenPoint();
+    if (win === stripWindow) {
+      // The strip moves like any window, kept whole on the display under the pointer.
+      const display = screen.getDisplayNearestPoint(cursor);
+      const p = clampStripPosition(display, drag.origin[0] + cursor.x - drag.cursor.x, drag.origin[1] + cursor.y - drag.cursor.y, win.getBounds().height);
+      win.setPosition(p.x, p.y, false);
+      return;
+    }
     win.setPosition(drag.origin[0] + cursor.x - drag.cursor.x, drag.origin[1] + cursor.y - drag.cursor.y, false);
   } else {
+    if (windowDrags.has(win.id) && win === stripWindow) {
+      // Let go: it settles (snapping into the Dock band when dropped near it) and is remembered.
+      const display = screen.getDisplayMatching(win.getBounds());
+      const drop = stripDropBounds(display, win.getBounds());
+      win.setBounds(drop.bounds, false);
+      saveStripPosition(display, drop.saved);
+    }
     windowDrags.delete(win.id);
   }
 });
