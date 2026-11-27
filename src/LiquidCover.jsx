@@ -187,6 +187,8 @@ export default function LiquidCover({ src, isPlaying, active = true, calm = fals
         g.cur = g.from.map((c, i) => c.map((v, k) => v + (to[i][k] - v) * e));
       }
       const gliding = g.p < 1;
+      // (tests wait for a colour change to finish: only it may draw while a list scrolls)
+      if (gliding) cv.dataset.liquidGlide = '1'; else if (cv.dataset.liquidGlide) delete cv.dataset.liquidGlide;
       paint();
       // keep going only while there is something to show
       if (on && (moving || gliding)) g.raf = requestAnimationFrame(draw);
