@@ -2631,8 +2631,11 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     // used to be 44 synthetic wheel events; under Rosetta they arrived as only 8 scroll events,
     // in bursts with gaps longer than the 450ms rest, where the motion rightly resumed.)
     const whileScrolling = await execB(`new Promise((res) => { const s = document.querySelector('.scrollable'); const c = () => +(document.querySelector('.liquid-cover--calm .liquid-cover-canvas')?.dataset.liquidFrames || 0);
-      let a = null; let k = 0; const t0 = performance.now();
-      const step = (now) => { s.scrollTop += (Math.floor(k++ / 15) % 2 ? -60 : 60); if (a === null && now - t0 > 150) a = c(); if (now - t0 < 850) requestAnimationFrame(step); else res(c() - (a ?? c())); };
+      let a = null; let dir = 1; const t0 = performance.now();
+      // every frame really moves the list (it turns back at either end: a clamped frame fires no
+      // scroll event, and at Rosetta's frame rate a run of them outlasted the 450ms rest)
+      const step = (now) => { const max = s.scrollHeight - s.clientHeight; if (s.scrollTop + 60 * dir > max || s.scrollTop + 60 * dir < 0) dir = -dir; s.scrollTop += 60 * dir;
+        if (a === null && now - t0 > 150) a = c(); if (now - t0 < 850) requestAnimationFrame(step); else res(c() - (a ?? c())); };
       requestAnimationFrame(step); })`);
     const glideDuring = await execB(`!!document.querySelector('.liquid-cover--calm .liquid-cover-canvas')?.dataset.liquidGlide`);
     check(calm.here && calm.covers && calm.same && calm.rowOnTop && calmPerSec >= 4 && calmPerSec <= 17 && whileScrolling === 0,
