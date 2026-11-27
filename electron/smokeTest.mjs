@@ -815,7 +815,9 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
 
     check(await exec(`!document.querySelector('.nav-search-btn') && !document.querySelector('.search-panel')`), 'the title bar has no search button and there is no floating search panel');
     await clickAt('.track-header-search');
-    let sf = await waitFor(sField, v => v && v.open && v.focused);
+    // (wait for the settled state: the Title label fades out, and on a slow machine (Rosetta) it is
+    // still fading when the field already has focus)
+    let sf = await waitFor(sField, v => v && v.open && v.focused && !v.titleShown);
     check(sf && sf.open && sf.focused && !sf.titleShown, `the column header's 🔍 opens the search field over the Title column, focused (${JSON.stringify(sf && { open: sf.open, focused: sf.focused, titleShown: sf.titleShown })})`);
     await setQuery('rasmus coming');
     sf = await waitFor(sField, v => v && v.rows.length === 1);
@@ -1131,7 +1133,10 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       const glide = await exec(`(() => { window.__th.run = false; const s = window.__th.s; return { n: s.length, mid: s.filter(x => x > 2 && x < 28).length, peak: +Math.max(...s).toFixed(1), end: +s[s.length - 1].toFixed(1) }; })()`);
       check(np && np.layer === 'split' && !np.lyricsOpen && np.lit === 'library' && np.thumbOff !== null && Math.abs(np.thumbOff) <= 1,
         `the Library button puts the Library there instead (one at a time), and the thumb moves behind it (${JSON.stringify(np)})`);
-      check(glide.n > 10 && glide.mid >= 2 && Math.abs(glide.end - 30) < 0.5, `the thumb glides across rather than jumping (${glide.mid} in-between frames: ${JSON.stringify(glide)})`);
+      // In-between frames, or the spring's overshoot past its end (a jump can't overshoot): on a slow
+      // machine (Rosetta) the click stalls the page through the move, and the sampler sees only the
+      // overshoot settling (0 in-between frames, peak 32.7).
+      check(glide.n > 10 && (glide.mid >= 2 || glide.peak > glide.end + 0.5) && Math.abs(glide.end - 30) < 0.5, `the thumb glides across rather than jumping (${glide.mid} in-between frames, peak ${glide.peak}: ${JSON.stringify(glide)})`);
       await realClick('[data-np-tool="library"]');
       np = await settledPill(v => v.layer === 'open' && v.on === 'none');
       check(np && np.layer === 'open' && !np.lyricsOpen && np.lit === null && np.thumbOp === 0, `pressing the lit one again hides it, leaving the song alone, and the thumb goes (${JSON.stringify(np)})`);
@@ -2622,7 +2627,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     for (let k = 0; k < 44; k++) {
       mainWindow.webContents.sendInputEvent({ type: 'mouseWheel', x: wheelAt.x, y: wheelAt.y, deltaX: 0, deltaY: k % 20 < 10 ? -300 : 300, canScroll: true });
       await sleep(20);
-      if (k === 4) scrollingP = calmFrames(700);
+      if (k === Math.round(4 * SLOW)) scrollingP = calmFrames(700); // (later on a slow machine: its first wheel events land late)
     }
     const whileScrolling = await scrollingP;
     check(calm.here && calm.covers && calm.same && calm.rowOnTop && calmPerSec >= 4 && calmPerSec <= 17 && whileScrolling === 0,
