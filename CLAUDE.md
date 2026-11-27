@@ -114,6 +114,7 @@ Each looks fine in `npm run dev` (or by eye) and breaks somewhere you won't noti
 | Size a component with `getBoundingClientRect()` while an ancestor transforms | The rect includes the scale. Use `clientWidth` / `clientHeight`. |
 | Size or compare Now Playing's cover with `getBoundingClientRect()` | It "breathes" (a 12s 1.8% scale). Use `offsetWidth` about its centre; place things beside it from its own `min(100cqw, 100cqh, 820px)`, outside its wrapper. |
 | Seed a smoke library with fake file paths | The focus-time `checkPaths` sweep removes them mid-suite. Give every fixture track a real file (a copy of `test-fixture.mp3`). |
+| Expire the restore-time autoplay suppressor (`suppressNextAutoplayRef`) on a timer | A slow Mac loads the song after the timer: the paused song starts by itself. It waits for its autoplay; every deliberate play clears it. |
 | Add a button to the song's pill (`NowPlayingPill.jsx`) without checking 561px wide | It clears the centred pill there only because the Library button hides under 900px; with all three buttons they overlap by ~20px. Smoke checks 561px and 380px. |
 
 Verify with `npm run test` **and** the smoke suite — several of the above are only observable in a built app, which is exactly what `--smoke` runs against.

@@ -180,9 +180,14 @@ export default function App() {
   const pendingResumeTimeRef = useRef(0);
   // Setting currentTrack on restore changes <audio>'s src, which re-triggers the browser's
   // native autoplay (the autoplay attribute applies to every src change, not just first
-  // mount) - this suppresses exactly that one unwanted play. The timeout is a safety net so
-  // a flag that's never consumed (e.g. the file fails to load) can't swallow a later,
-  // legitimate manual play click.
+  // mount) - this suppresses exactly that one unwanted play (also the reload after a tag
+  // write while paused). No timer: it waits for that autoplay however long the file takes
+  // to load. It used to expire after 3s, and on a slow Mac (measured under Rosetta) the
+  // restored song loaded later than that and started playing by itself. Instead every
+  // deliberate play clears it first (playTrack, togglePlay, the repeat-one restart: every
+  // way to start a song, media keys and the strip included), so it can never swallow a
+  // real click, and a file that fails to load clears it too (onError). A flag left armed
+  // used to pause the next song that started.
   const suppressNextAutoplayRef = useRef(false);
   const fac = useRef(new FastAverageColor());
   // blob: URL currently held by navigator.mediaSession artwork (revoked on replace).
@@ -281,6 +286,8 @@ export default function App() {
   const [queueSource, setQueueSource] = useState(null);
 
   const playTrack = React.useCallback((track, isBack = false, source) => {
+    // A deliberate play: never swallowed by the restore-time autoplay suppressor (see its ref).
+    suppressNextAutoplayRef.current = false;
     if (!isBack && currentTrack && currentTrack.filePath !== track.filePath) {
       setPlaybackHistory(prev => {
         const newHistory = [...prev, currentTrack];
@@ -295,10 +302,7 @@ export default function App() {
     // confirm modal's Play, drag-and-drop, row double-click), so this one
     // branch covers all of them.
     if (currentTrack?.filePath === track.filePath && audioRef.current) {
-      // A deliberate play request must never be swallowed by the restore-time
-      // autoplay suppressor: if that flag happened to be armed, onPlay would
-      // immediately re-pause us and reproduce the very bug this fixes.
-      suppressNextAutoplayRef.current = false;
+      // (the autoplay suppressor was cleared above: armed, onPlay would re-pause us at once)
       audioRef.current.currentTime = 0;
       audioRef.current.play().catch(() => { /* autoplay policy, or unreadable file — onError handles the latter */ });
     }
@@ -526,7 +530,6 @@ export default function App() {
           // <audio autoPlay> is suppressed and the saved position re-applied.
           if (!autoPlay) {
             suppressNextAutoplayRef.current = true;
-            setTimeout(() => { suppressNextAutoplayRef.current = false; }, 3000);
             pendingResumeTimeRef.current = savedTime || 0;
           }
           setCurrentTrack(restoredCurrent);
@@ -944,6 +947,7 @@ export default function App() {
     
     if (isAutoPlay && repeatMode === 'one') {
       if (audioRef.current) {
+        suppressNextAutoplayRef.current = false;
         audioRef.current.currentTime = 0;
         audioRef.current.play();
       }
@@ -1024,6 +1028,7 @@ export default function App() {
     if (isPlaying) {
       audioRef.current.pause();
     } else {
+      suppressNextAutoplayRef.current = false; // a deliberate play (see the ref)
       audioRef.current.play();
     }
   }, [currentTrack, sortedLibrary, isShuffle, playTrack, scrollToTrack, isPlaying, librarySelectedRef]);
@@ -2841,6 +2846,7 @@ export default function App() {
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onError={async () => {
+            suppressNextAutoplayRef.current = false; // its autoplay will never come
             if (!currentTrack || !window.electronAPI?.checkPaths) return;
             const [exists] = await window.electronAPI.checkPaths([currentTrack.filePath]);
             if (!exists) {
