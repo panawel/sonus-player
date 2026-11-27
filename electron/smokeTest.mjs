@@ -991,7 +991,9 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
       drag = await exec(stripDraggable);
       check(drag.every(d => d.draggable), `Now Playing: the title strip stays draggable between the pills (${JSON.stringify(drag.filter(d => !d.draggable))})`);
       await exec(`window.__sonusTest.setView('library')`);
-      await sleep(300);
+      // (wait for Now Playing's back arrow to have left and unmounted: started while it is still
+      // leaving, the entrance below springs from its live size, not from small)
+      await waitFor(`!document.querySelector('.nav-pill .bubble-slot:has(.nav-back-btn)')`, v => v === true, { timeout: 3000 });
 
       // ── the bubble motion itself ──
       // A rAF sampler records the back arrow's scale/width/opacity and the pill's centre while it
@@ -1123,7 +1125,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         && np.orbs === 0 && np.tabLit && np.on === 'none' && np.lit === null && np.thumbOp === 0,
         `on the song a pill at the top right holds Lyrics, Library and Chill, all clickable and clear of the top bar; nothing beside the cover; nothing lit (${JSON.stringify(np)})`);
       await realClick('[data-np-tool="lyrics"]');
-      np = await settledPill(v => v.lyricsOpen && v.on === 'lyrics');
+      np = await settledPill(v => v.lyricsOpen && v.on === 'lyrics' && v.thumbOp === 1);
       check(np && np.lyricsOpen && np.lit === 'lyrics' && np.thumbOp === 1 && Math.abs(np.thumbOff) <= 1,
         `Lyrics shows the lyrics beside the song, and the lit thumb sits behind it (${JSON.stringify(np)})`);
       // the thumb travels to the Library: it passes through in-between positions (a spring), it doesn't jump
@@ -2624,15 +2626,14 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
     await waitFor(`!document.querySelector('.liquid-cover--calm .liquid-cover-canvas')?.dataset.liquidGlide`, x => x === true, { timeout: 6000 });
     const calmPerSec = await calmFrames(1000);
     const wheelAt = await execB(`(() => { const r = document.querySelector('.scrollable').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
-    // (count only once the scroll is underway: a frame drawn just before the first wheel event
-    // reaches the page is not "while it scrolls", and timing that edge made this flaky)
-    let scrollingP = null;
-    for (let k = 0; k < 44; k++) {
-      mainWindow.webContents.sendInputEvent({ type: 'mouseWheel', x: wheelAt.x, y: wheelAt.y, deltaX: 0, deltaY: k % 20 < 10 ? -300 : 300, canScroll: true });
-      await sleep(20);
-      if (k === Math.round(4 * SLOW)) scrollingP = calmFrames(700); // (later on a slow machine: its first wheel events land late)
-    }
-    const whileScrolling = await scrollingP;
+    // The list scrolls on every frame for ~0.85s, driven in the page (as a trackpad does): the
+    // frames the calm colour draws are counted from 150ms in, once the scroll is underway. (It
+    // used to be 44 synthetic wheel events; under Rosetta they arrived as only 8 scroll events,
+    // in bursts with gaps longer than the 450ms rest, where the motion rightly resumed.)
+    const whileScrolling = await execB(`new Promise((res) => { const s = document.querySelector('.scrollable'); const c = () => +(document.querySelector('.liquid-cover--calm .liquid-cover-canvas')?.dataset.liquidFrames || 0);
+      let a = null; let k = 0; const t0 = performance.now();
+      const step = (now) => { s.scrollTop += (Math.floor(k++ / 15) % 2 ? -60 : 60); if (a === null && now - t0 > 150) a = c(); if (now - t0 < 850) requestAnimationFrame(step); else res(c() - (a ?? c())); };
+      requestAnimationFrame(step); })`);
     const glideDuring = await execB(`!!document.querySelector('.liquid-cover--calm .liquid-cover-canvas')?.dataset.liquidGlide`);
     check(calm.here && calm.covers && calm.same && calm.rowOnTop && calmPerSec >= 4 && calmPerSec <= 17 && whileScrolling === 0,
       `the full Library sits on the song's colours, calm: the same palette as Now Playing, under the list, at most 15fps (${calmPerSec}/s) and still while it scrolls (${whileScrolling} frames${glideDuring ? ', a colour change was crossfading' : ''}) (${JSON.stringify(calm)})`);
@@ -4221,6 +4222,7 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         for (let i = 0; i < 40 && drawn === 0; i++) drawn = await flareCount();
         out.flares = drawn;
         out.playing = a ? !a.paused : false;
+        out.audio = a ? { same: a === document.querySelector('audio'), ready: a.readyState, err: a.error && a.error.code, src: (a.src || '').split('/').pop(), t: +a.currentTime.toFixed(1), ended: a.ended } : null;
         out.artworkPresent = !!document.querySelector('.np-artwork');
         // Measure the settled state.
         await sleep(1700);
@@ -4288,8 +4290,8 @@ export async function runSmoke({ mainWindow, parseFilePaths, getStore, loadLibra
         `frame-time probe measured the animated study room while WebGL was drawing it (frames ${frame.chillRoom?.frames}, live ${frame.chillRoomLive})`);
       // If the liquid colour never drew (or stood still), the NP number is measuring an empty
       // panel and must not be mistaken for a clean bill of health.
-      check(frame.flares > (SLOW > 1 ? 1 : 5) && frame.playing === true, // (Rosetta: 3 frames in 0.3s seen)
-        `frame-time probe measured Now Playing with its liquid colour drawing (${frame.flares} frames in 0.3s, playing ${frame.playing})`);
+      check(frame.flares > (SLOW > 1 ? 0 : 5) && frame.playing === true, // (Rosetta: 1-3 frames in 0.3s seen)
+        `frame-time probe measured Now Playing with its liquid colour drawing (${frame.flares} frames in 0.3s, playing ${frame.playing}, audio ${JSON.stringify(frame.audio)})`);
     }
   } catch (err) {
     failures.push(`frame-time probe error: ${err.stack || err}`);
