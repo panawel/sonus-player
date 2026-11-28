@@ -8,6 +8,7 @@ describe('sanitizeSession', () => {
       view: 'now_playing', previousView: 'home', homeDetailItem: { type: 'mix', key: '/m/a.mp3', label: 'A' },
       homeDetailOrigin: 'library', queueSource: { label: 'Artist', item: { type: 'artist', key: 'Artist' } },
       isChillMode: true, isLyricsOpen: true, npBeside: true, playNext: ['/m/b.mp3'], history: ['/m/c.mp3'],
+      playing: { kind: 'list', paths: ['/m/a.mp3', '/m/d.mp3'], order: ['/m/d.mp3', '/m/a.mp3'], at: '/m/a.mp3' },
       mix: { seedPath: '/m/a.mp3', paths: ['/m/d.mp3'] }, scroll: { library: 400, home: 20 },
       detailScrolls: { 'artist:X': 120 }, libraryScroll: 400, stripOpen: true,
     };
@@ -42,5 +43,21 @@ describe('launchPlan', () => {
     expect(launchPlan({ stripOpen: false })).toEqual({ openStrip: false });
     expect(launchPlan(null)).toEqual({ openStrip: false });
     expect(launchPlan({ stripOpen: true }, { smoke: true })).toEqual({ openStrip: false });
+  });
+});
+
+describe('the list that is playing', () => {
+  it('keeps a list, its shuffled order and where it is', async () => {
+    const { sanitizeSession } = await import('./session.mjs');
+    const s = sanitizeSession({ playing: { kind: 'list', paths: ['/a.mp3', '/b.mp3'], order: ['/b.mp3', '/a.mp3'], at: '/b.mp3' } });
+    expect(s.playing).toEqual({ kind: 'list', paths: ['/a.mp3', '/b.mp3'], order: ['/b.mp3', '/a.mp3'], at: '/b.mp3' });
+  });
+  it('the Library keeps no list of its own; nonsense gives none', async () => {
+    const { sanitizeSession, SESSION_PLAYING_MAX } = await import('./session.mjs');
+    expect(sanitizeSession({ playing: { kind: 'library', paths: ['/a.mp3'], order: null, at: 7 } }).playing).toEqual({ kind: 'library', paths: null, order: null, at: null });
+    expect(sanitizeSession({ playing: { kind: 'other' } }).playing).toBe(null);
+    expect(sanitizeSession({ playing: 'x' }).playing).toBe(null);
+    const long = Array.from({ length: SESSION_PLAYING_MAX + 9 }, (_, i) => '/' + i + '.mp3');
+    expect(sanitizeSession({ playing: { kind: 'list', paths: long, order: long } }).playing.order).toHaveLength(SESSION_PLAYING_MAX);
   });
 });

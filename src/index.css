@@ -69,6 +69,16 @@ button, input, textarea, a, .clickable, .scrollable, .track-dropdown {
   -webkit-app-region: no-drag;
 }
 
+/* Focus rings: never the system's. It is drawn in the macOS accent colour (measured: a
+   rgb(229, 151, 0) yellow-orange ring on this Mac), on a focused button as soon as a key is pressed.
+   Moving around with the Tab key gets a subtle glass ring instead, and only then (main.jsx sets
+   data-kbd-nav on Tab, clears it on any pointer press). Text fields keep their own look. */
+button:focus, a:focus, .clickable:focus, [role="button"]:focus { outline: none; }
+:root[data-kbd-nav] :is(button, a, .clickable, [role="button"]):not(input, textarea):focus-visible {
+  outline: 1.5px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 2px;
+}
+
 textarea {
   -webkit-user-select: text;
   user-select: text;
@@ -499,6 +509,14 @@ input[type="range"].mini-seek-bar:hover::-webkit-slider-thumb {
   font-weight: 600;
   white-space: nowrap;
 }
+/* Now Playing + Library on together (the split): one lit shape over the two tabs (App.jsx's
+   navJoined; Now Playing is its left end, Library its right, as on screen). The pill's 2px gap between
+   them is filled by the right end's shadow in the same colour. */
+.nav-pill-btn {
+  transition: background 0.15s ease, color 0.15s ease, border-radius 0.2s ease, box-shadow 0.2s ease, transform 0.55s var(--spring-ease, cubic-bezier(0.34, 1.56, 0.64, 1));
+}
+.nav-pill-btn.active.nav-joined-start { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.nav-pill-btn.active.nav-joined-end { border-top-left-radius: 0; border-bottom-left-radius: 0; box-shadow: -2px 0 0 var(--glass-active); }
 /* Narrow windows: icon-only tabs. */
 .nav-pill-btn.icon-only {
   padding: 0 9px;

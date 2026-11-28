@@ -12,6 +12,9 @@
 const VIEWS = new Set(['home', 'library', 'now_playing']);
 const REPEAT = new Set(['off', 'all', 'one']);
 export const SESSION_LIST_MAX = 500; // queue / history / a mix's songs: far more than anyone keeps
+// The list that is playing (src/playQueue.js, QUEUE_SAVE_MAX there): a details page or a decade
+// can hold thousands of songs, and a Library shuffle keeps its next this-many.
+export const SESSION_PLAYING_MAX = 5000;
 
 const isStr = (v) => typeof v === 'string' && v.length > 0;
 const paths = (v) => (Array.isArray(v) ? v.filter(isStr).slice(0, SESSION_LIST_MAX) : []);
@@ -38,6 +41,11 @@ export function sanitizeSession(raw) {
   const mix = s.mix && typeof s.mix === 'object' && isStr(s.mix.seedPath)
     ? { seedPath: s.mix.seedPath, paths: paths(s.mix.paths) }
     : null;
+  const pl = s.playing && typeof s.playing === 'object' && !Array.isArray(s.playing) ? s.playing : null;
+  const plPaths = (v) => (Array.isArray(v) ? v.filter(isStr).slice(0, SESSION_PLAYING_MAX) : null);
+  const playing = pl && (pl.kind === 'list' || pl.kind === 'library')
+    ? { kind: pl.kind, paths: pl.kind === 'list' ? plPaths(pl.paths) : null, order: plPaths(pl.order), at: isStr(pl.at) ? pl.at : null }
+    : null;
   return {
     currentTrackPath: isStr(s.currentTrackPath) ? s.currentTrackPath : null,
     currentTime: Number.isFinite(s.currentTime) && s.currentTime > 0 ? s.currentTime : 0,
@@ -52,6 +60,7 @@ export function sanitizeSession(raw) {
     isLyricsOpen: s.isLyricsOpen === true,
     npBeside: s.npBeside === true,
     playNext: paths(s.playNext),
+    playing,
     history: paths(s.history),
     mix,
     scroll: numbers(s.scroll),

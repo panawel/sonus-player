@@ -35,6 +35,7 @@ import cx from 'classnames';
 import { splitArtists, isRTL } from './audioUtils.js';
 import { __setMixCacheForTest, getCachedMix, seedMixCache } from './useMix.js';
 import { glowRgb } from './glowColor.js';
+import { startQueue, neighbour, markPlayed, queueSequence, withShuffle, withAdded, queueToSaved, queueFromSaved } from './playQueue.js';
 import {
   LIBRARY_EXTRA_COLUMNS, ULTRA_COMPACT_PANEL_BREAKPOINT, NARROW_LAYOUT_BREAKPOINT, MINI_LAYOUT_HEIGHT_BREAKPOINT, MINI_MIN_HEIGHT, TITLE_STRIP_HEIGHT,
   LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT, extraColumnFitCount,
@@ -154,6 +155,20 @@ export default function App() {
     if (!searchWordList.length) return sortedLibrary;
     return sortedLibrary.filter(t => trackMatchesWords(t, searchWordList));
   }, [sortedLibrary, searchWordList]);
+  // What's playing (playQueue.js): the list a song was started from and its order. A ref, not
+  // state: nothing renders it, and next/previous/shuffle must read the latest at once. The
+  // Library's list is live (what it shows: its sort and search), hence these mirrors.
+  const playQueueRef = useRef(null);
+  // The song playing came from "Play Next" (not from the list): the list carries on from where
+  // it was (its `at`), not from wherever this song happens to sit in it.
+  const fromPlayNextRef = useRef(false);
+  const visiblePathsRef = useRef([]);
+  visiblePathsRef.current = React.useMemo(() => visibleTracks.map(t => t.filePath), [visibleTracks]);
+  const libraryByPath = React.useMemo(() => new Map(library.map(t => [t.filePath, t])), [library]);
+  const libraryByPathRef = useRef(libraryByPath);
+  libraryByPathRef.current = libraryByPath;
+  const isShuffleRef = useRef(isShuffle);
+  isShuffleRef.current = isShuffle;
   const librarySelection = useTrackSelection(visibleTracks);
   // Stable pieces of the selection API for use inside memoized callbacks.
   const { clear: clearLibrarySelection, prune: pruneLibrarySelection, selectedPathsRef: librarySelectedRef } = librarySelection;
@@ -165,6 +180,14 @@ export default function App() {
   const activeSelectionRef = useRef(null);
   // Global Space handler needs togglePlay before its declaration point.
   const togglePlayRef = useRef(null);
+  // The player's Shuffle (button, Controls menu, the strip): turning it on deals the list that is
+  // playing a new order, with the song playing first; off, the list's own order carries on.
+  const setShuffle = React.useCallback((on) => {
+    setIsShuffle(on);
+    const q = playQueueRef.current;
+    if (q) playQueueRef.current = withShuffle(q, on, visiblePathsRef.current, currentTrackRef.current?.filePath);
+  }, []);
+  const toggleShuffle = React.useCallback(() => setShuffle(!isShuffleRef.current), [setShuffle]);
   const libraryRef = useRef(library);
   libraryRef.current = library;
   // Mirror ref (same idiom as viewRef/libraryRef): lets the Services handler
@@ -327,6 +350,31 @@ export default function App() {
     playTrack(track, isBack, null);
   }, [playTrack]);
 
+  // Starts a list playing (see playQueue.js): `tracks` is the list, `start` the song picked (or
+  // none: its first, or a random one when shuffled). `shuffle` given (a page's own Play / Shuffle
+  // buttons) also sets the player's Shuffle to match; left out (a song picked from a list), the
+  // player's Shuffle decides. It replaces whatever list was playing; "Play Next" songs stay.
+  const startList = React.useCallback((tracks, { kind = 'list', start = null, shuffle, source = null, isBack = false } = {}) => {
+    if (!tracks || tracks.length === 0) return null;
+    const sh = shuffle ?? isShuffleRef.current;
+    if (shuffle !== undefined && shuffle !== isShuffleRef.current) setIsShuffle(shuffle);
+    const q = startQueue({ kind, paths: tracks.map(t => t.filePath), start: start?.filePath ?? null, shuffle: sh });
+    playQueueRef.current = q;
+    fromPlayNextRef.current = false;
+    const first = start ?? tracks.find(t => t.filePath === q.at) ?? tracks[0];
+    playTrack(first, isBack, source);
+    return first;
+  }, [playTrack]);
+  // A song picked in the Library: the Library is the list (as it shows: its sort and search).
+  const libraryPlayTrack = React.useCallback((track, isBack, tracks) => {
+    startList(tracks?.length ? tracks : visibleTracks, { kind: 'library', start: track, isBack: !!isBack });
+  }, [startList, visibleTracks]);
+  // A song picked from a Home row (Quick Picks): that row is the list.
+  const homePlayTrack = React.useCallback((track, isBack, tracks) => {
+    if (!tracks?.length) { playTrackFresh(track, isBack); return; }
+    startList(tracks, { start: track, isBack: !!isBack });
+  }, [startList, playTrackFresh]);
+
   // Home screen state
   const [homeDetailItem, setHomeDetailItem] = useState(null);
   const [homeDetailOrigin, setHomeDetailOrigin] = useState(null);
@@ -370,12 +418,11 @@ export default function App() {
   // forcedNextQueueRef. `source` (see queueSource above) labels the Now
   // Playing breadcrumb — omit it for a source with no meaningful "place" to
   // label (e.g. Quick Picks' randomized grab-bag).
+  // A page's own Play / Shuffle buttons: the whole list, from its start (Play) or a random song
+  // (Shuffle), and the player's Shuffle switched to match.
   const playAllTracks = React.useCallback((tracks, shuffle = false, source = null) => {
-    if (!tracks || tracks.length === 0) return;
-    let ordered = shuffle ? [...tracks].sort(() => Math.random() - 0.5) : tracks;
-    playTrack(ordered[0], false, source);
-    forcedNextQueueRef.current = ordered.slice(1).map(t => t.filePath);
-  }, [playTrack]);
+    startList(tracks, { shuffle: !!shuffle, source });
+  }, [startList]);
 
   // HomeDetailView's own Play All/Shuffle, pre-labeled with whichever
   // Artist/Album/Year/Quality/… page is currently open — HomeDetailView.jsx
@@ -393,10 +440,10 @@ export default function App() {
   // All would, so "Playing from X" stays honest instead of being a label with
   // no actual continuation. Falls back to a plain fresh pick if TrackList
   // somehow doesn't supply them.
-  const detailPlayTrack = React.useCallback((track, isBack, tracks, index) => {
-    if (!tracks || index == null) { playTrack(track, isBack, null); return; }
-    playAllTracks(tracks.slice(index), false, homeDetailItem ? { label: detailItemLabel(homeDetailItem), item: homeDetailItem } : null);
-  }, [playTrack, playAllTracks, homeDetailItem]);
+  const detailPlayTrack = React.useCallback((track, isBack, tracks) => {
+    if (!tracks?.length) { playTrack(track, isBack, null); return; }
+    startList(tracks, { start: track, isBack: !!isBack, source: homeDetailItem ? { label: detailItemLabel(homeDetailItem), item: homeDetailItem } : null });
+  }, [playTrack, startList, homeDetailItem]);
 
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   // The spring every title-strip press/toggle/bubble uses (see bubbleMotion.js) as a CSS variable.
@@ -435,8 +482,8 @@ export default function App() {
     // element's own play/pause events are the single source of truth. Claiming
     // "playing" before any sound exists is exactly what turned this bug from
     // "nothing happened" into "looks stuck": the button showed Pause over silence.
-    playTrack(tracks[0], true);
-  }, [playTrack, clearLibrarySelection]);
+    startList(tracks, { kind: 'library', start: tracks[0], isBack: true });
+  }, [startList, clearLibrarySelection]);
 
   // Drag-and-drop and the title bar's + (Add music). Both deliberately keep the
   // confirm modal; only the OS-driven open paths skip it.
@@ -606,6 +653,8 @@ export default function App() {
       const existingPaths = new Set(library.map(t => t.filePath));
       const uniqueNew = newTracks.filter(t => !existingPaths.has(t.filePath));
       setLibrary([...library, ...uniqueNew]);
+      // ...and join the list that is playing (at its end, or among what's to come when shuffled)
+      playQueueRef.current = withAdded(playQueueRef.current, uniqueNew.map(t => t.filePath), currentTrack?.filePath);
     }
   };
 
@@ -683,6 +732,7 @@ export default function App() {
     const uniqueNew = newTracks.filter(t => !existingPaths.has(t.filePath));
     if (uniqueNew.length === 0) return 0;
     setLibrary([...lib, ...uniqueNew]);
+    playQueueRef.current = withAdded(playQueueRef.current, uniqueNew.map(t => t.filePath), currentTrackRef.current?.filePath);
     return uniqueNew.length;
   }, []);
 
@@ -961,37 +1011,57 @@ export default function App() {
       const forcedPath = forcedNextQueueRef.current.shift();
       const forcedIndex = library.findIndex(t => t.filePath === forcedPath);
       if (forcedIndex !== -1) {
+        fromPlayNextRef.current = true;
         playTrack(library[forcedIndex], false);
         scrollToTrack(forcedPath, !isAutoPlay);
         return;
       }
     }
 
-    // Sequential order follows the displayed (sorted) library, not raw insertion order.
-    let nextIndex;
-    if (isShuffle) {
-      nextIndex = Math.floor(Math.random() * sortedLibrary.length);
-    } else {
-      const currentIndex = sortedLibrary.findIndex(t => t.filePath === currentTrack.filePath);
-
-      if (isAutoPlay && repeatMode === 'off' && currentIndex === sortedLibrary.length - 1) {
-        setIsPlaying(false);
-        if (audioRef.current) {
-          audioRef.current.currentTime = 0;
-          audioRef.current.pause();
-        }
-        return;
+    // Then the list that is playing (playQueue.js), in its order. A song that ends the list with
+    // Repeat off stops; Repeat All, or Next pressed by hand, goes round to its first song. No list
+    // yet (a restored session from before lists, or a song started some other way): the Library.
+    const live = visiblePathsRef.current;
+    const byPath = libraryByPathRef.current;
+    let q = playQueueRef.current;
+    if (!q) q = startQueue({ kind: 'library', paths: live, start: currentTrack.filePath, shuffle: isShuffleRef.current });
+    const from = fromPlayNextRef.current && q.at ? q.at : currentTrack.filePath;
+    const nextPath = neighbour(q, live, from, 1, { wrap: repeatMode === 'all' || !isAutoPlay, playable: (p) => byPath.has(p) });
+    if (!nextPath) {
+      playQueueRef.current = q;
+      setIsPlaying(false);
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.pause();
       }
-
-      nextIndex = (currentIndex + 1) % sortedLibrary.length;
+      return;
     }
-    playTrack(sortedLibrary[nextIndex], false);
-    scrollToTrack(sortedLibrary[nextIndex].filePath, !isAutoPlay);
-  }, [library, sortedLibrary, currentTrack, repeatMode, isShuffle, playTrack, scrollToTrack]);
+    playQueueRef.current = markPlayed(q, nextPath, live);
+    fromPlayNextRef.current = false;
+    playTrack(byPath.get(nextPath), false);
+    scrollToTrack(nextPath, !isAutoPlay);
+  }, [library, currentTrack, repeatMode, playTrack, scrollToTrack]);
 
   const playPrev = React.useCallback(() => {
     if (library.length === 0 || !currentTrack) return;
-    
+
+    // Within the list that is playing: back through its order (the shuffled one when shuffled).
+    // At its first song: Repeat All goes round to the last, otherwise the song starts again.
+    const live = visiblePathsRef.current;
+    const byPath = libraryByPathRef.current;
+    const q = playQueueRef.current;
+    if (q && !fromPlayNextRef.current && queueSequence(q, live).includes(currentTrack.filePath)) {
+      const prevPath = neighbour(q, live, currentTrack.filePath, -1, { wrap: repeatMode === 'all', playable: (p) => byPath.has(p) });
+      if (prevPath) {
+        playQueueRef.current = markPlayed(q, prevPath, live);
+        playTrack(byPath.get(prevPath), true);
+        scrollToTrack(prevPath, true);
+      } else if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+      }
+      return;
+    }
+    // A song that isn't part of the list (a "Play Next" one): back through what played.
     if (playbackHistory.length > 0) {
        const historyCopy = [...playbackHistory];
        const prevTrack = historyCopy.pop();
@@ -1004,7 +1074,7 @@ export default function App() {
        playTrack(sortedLibrary[prevIndex], true);
        scrollToTrack(sortedLibrary[prevIndex].filePath, true);
     }
-  }, [library, sortedLibrary, currentTrack, playbackHistory, playTrack, scrollToTrack]);
+  }, [library, sortedLibrary, currentTrack, playbackHistory, playTrack, scrollToTrack, repeatMode]);
 
   const togglePlay = React.useCallback(() => {
     if (!currentTrack) {
@@ -1013,15 +1083,13 @@ export default function App() {
       // track instead: the single highlighted row if there is one, else the first track
       // (or a random one if shuffle is on). playTrack mounts <audio autoPlay>, which starts
       // playback itself once the new element is inserted - no manual .play() call needed here.
-      if (sortedLibrary.length === 0) return;
+      // The Library (as it shows) is the list.
+      const list = visibleTracks.length ? visibleTracks : sortedLibrary;
+      if (list.length === 0) return;
       const selected = librarySelectedRef.current;
-      let startTrack = selected.length === 1 ? sortedLibrary.find(t => t.filePath === selected[0]) : null;
-      if (!startTrack) {
-        const startIndex = isShuffle ? Math.floor(Math.random() * sortedLibrary.length) : 0;
-        startTrack = sortedLibrary[startIndex];
-      }
-      playTrack(startTrack, false);
-      scrollToTrack(startTrack.filePath, true);
+      const startTrack = selected.length === 1 ? list.find(t => t.filePath === selected[0]) ?? null : null;
+      const first = startList(list, { kind: 'library', start: startTrack });
+      if (first) scrollToTrack(first.filePath, true);
       return;
     }
     if (!audioRef.current) return;
@@ -1031,7 +1099,7 @@ export default function App() {
       suppressNextAutoplayRef.current = false; // a deliberate play (see the ref)
       audioRef.current.play();
     }
-  }, [currentTrack, sortedLibrary, isShuffle, playTrack, scrollToTrack, isPlaying, librarySelectedRef]);
+  }, [currentTrack, sortedLibrary, visibleTracks, startList, scrollToTrack, isPlaying, librarySelectedRef]);
   togglePlayRef.current = togglePlay;
 
   // Long-press (0.7s) on the Play/Pause button jumps the tracklist to the currently playing
@@ -1048,9 +1116,12 @@ export default function App() {
   // delay the ring's first appearance, so a normal quick click never flashes it for a frame.
   const QUICK_CLICK_MS = 250;
 
+  // The Library is on screen: alone, or beside the song in the split (not in Chill, nor under the
+  // mini player). Only then does holding Play/Pause jump the list to the song.
+  // (a function: read at the press, since isChillMode is declared further down; npSplitLibrary is full width only)
+  const libraryOnScreen = () => !isMiniLayout && (view === 'library' || (npSplitLibrary && !isChillMode));
   const handlePlayPausePressStart = () => {
-    // Not in mini mode: the Library it would scroll to is hidden underneath.
-    if (view !== 'library' || isMiniLayout) return;
+    if (!libraryOnScreen()) return;
     longPressTriggeredRef.current = false;
     pressStartTimeRef.current = Date.now();
     // The ring only shows once a press has clearly left "quick click" territory - the
@@ -1082,7 +1153,7 @@ export default function App() {
   };
 
   const handlePlayPauseClick = () => {
-    if (view !== 'library' || isMiniLayout) {
+    if (!libraryOnScreen()) {
       togglePlay();
       return;
     }
@@ -1118,7 +1189,7 @@ export default function App() {
     const ringCircumference = 2 * Math.PI * ringRadius;
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <button className={cx('player-control-button player-toggle clickable', { 'player-toggle--on': isShuffle })} aria-pressed={isShuffle} aria-label="Shuffle" style={{ color: isShuffle ? 'var(--chrome-text)' : 'var(--chrome-text-off)' }} onClick={(e) => { e.stopPropagation(); setIsShuffle(!isShuffle); }}>
+        <button className={cx('player-control-button player-toggle clickable', { 'player-toggle--on': isShuffle })} aria-pressed={isShuffle} aria-label="Shuffle" style={{ color: isShuffle ? 'var(--chrome-text)' : 'var(--chrome-text-off)' }} onClick={(e) => { e.stopPropagation(); toggleShuffle(); }}>
           <Shuffle size={secondarySize} />
         </button>
         <button className="player-control-button skip-btn clickable" style={{ color: 'var(--chrome-text)' }} onClick={(e) => { e.stopPropagation(); playPrev(); }}>
@@ -1398,6 +1469,7 @@ export default function App() {
       isLyricsOpen: st.isLyricsOpen,
       npBeside: st.npBeside,
       playNext: [...forcedNextQueueRef.current],
+      playing: queueToSaved(playQueueRef.current),
       history: st.playbackHistory.map(h => h.filePath),
       mix: mixSeed && mixTracks ? { seedPath: mixSeed.filePath, paths: mixTracks.map(m => m.filePath) } : null,
       scroll: { ...scrollPositionsRef.current },
@@ -1436,6 +1508,7 @@ export default function App() {
     if (openedFiles) return;
     const byPath = new Map(tracks.map(t => [t.filePath, t]));
     forcedNextQueueRef.current = (ss.playNext || []).filter(p => byPath.has(p));
+    playQueueRef.current = hasTrack ? queueFromSaved(ss.playing, { livePaths: tracks.map(t => t.filePath), exists: (p) => byPath.has(p) }) : null;
     setPlaybackHistory((ss.history || []).map(p => byPath.get(p)).filter(Boolean));
     if (ss.mix) {
       const seed = byPath.get(ss.mix.seedPath);
@@ -1537,18 +1610,14 @@ export default function App() {
     if (trackMenu) { setTrackMenu(null); return; }
     if (currentTrack) setTrackMenu({ filePaths: [currentTrack.filePath], anchorRect: e.currentTarget.getBoundingClientRect(), context: 'now-playing' });
   };
-  // The Now Playing tab (in the centred pill, after Library), whenever there is a song: it opens the
-  // song as it was last left (like the floating player) and is lit while the song is open, Chill
-  // included, where clicking it does nothing.
+  // The Now Playing tab (in the centred pill, after Library), whenever there is a song.
   const navNowPlayingVisible = !!currentTrack;
   // Now Playing's own pill at the top right (NowPlayingPill.jsx), only while the song is open and
-  // never in Chill (which has its own buttons there): Lyrics or the Library beside the song, one at
-  // a time (the lit one turns it off), then Chill. Lyrics only while the song has lyrics (or they
-  // are showing); the Library only where the window can split (never at phone width, where the
-  // top bar's Library is the Library).
+  // never in Chill (which has its own buttons there): Lyrics beside the song (the lit one turns it
+  // off), then Chill. Lyrics only while the song has lyrics (or they are showing). The Library
+  // beside the song is the top bar's Library (below).
   const npPillVisible = isNowPlayingOpen && !chillActive && !isMiniLayout && !!currentTrack;
   const sideLyricsVisible = !!currentTrack && !!(currentTrack.lyrics || isLyricsOpen);
-  const sideLibraryVisible = !!currentTrack && splitPossible;
   const toggleSideLyrics = () => { setNpBeside(false); setIsLyricsOpen((v) => !v); };
   // Chill needs a wide window: at phone width it fills the screen first and then opens Chill
   // (exactly File > Chill Mode, through main.js).
@@ -1558,12 +1627,35 @@ export default function App() {
     expandNowPlaying();
     setIsChillMode(true);
   };
-  const toggleSideLibrary = () => { setIsLyricsOpen(false); setNpBeside(!npSplitLibrary); };
-  // The top bar's Library: always the full Library (closing the song if it is open).
-  const onNavLibrary = () => { setView('library'); };
-  // The floating player opens the song as it was last left: the lyrics, the Library or nothing
-  // beside it (npBeside / isLyricsOpen are kept, and saved with the session).
-  const openFromFloatingPlayer = () => { expandNowPlaying(); };
+  // ── The top bar's Library and Now Playing: two tabs that can be on together ─────────────────
+  // Where the window can split (full width, 900px or wider, a song loaded: `splitPossible`) they
+  // are toggles: Library alone is the full Library, Now Playing alone the song, both the split (the
+  // song with the Library beside it), and clicking a lit one turns it off — never the last one lit
+  // (nothing happens then). Lyrics beside the song (the song's pill) takes the Library's half, so
+  // the Library tab goes off. Home stays an ordinary tab: it turns both off. Where the window can't
+  // split (phone width, under 900px, the mini player) both are ordinary tabs.
+  const navLibraryLit = view === 'library' || (npSplitLibrary && !chillActive);
+  const navJoined = npSplitLibrary && !chillActive; // both lit: one shape over the two tabs
+  const onNavLibrary = () => {
+    if (!splitPossible || !isNowPlayingOpen) { setView('library'); return; } // (already lit there: no change)
+    if (chillActive) { setIsChillMode(false); setIsLyricsOpen(false); setNpBeside(true); return; } // out of Chill to the split
+    if (npSplitLibrary) { setNpBeside(false); return; } // both on: Library off, the song alone
+    setIsLyricsOpen(false); // the song alone, or with its lyrics: the Library joins it
+    setNpBeside(true);
+  };
+  const onNavNowPlaying = () => {
+    if (isNowPlayingOpen) {
+      if (navJoined) setView('library'); // both on: Now Playing off, the full Library
+      return; // the only one lit (Chill included): nothing
+    }
+    if (splitPossible) {
+      // from the Library, the song joins it (the split); from Home or a details page, the song alone
+      if (view === 'library') { setIsLyricsOpen(false); setNpBeside(true); } else setNpBeside(false);
+    }
+    expandNowPlaying();
+  };
+  // The floating player (and the mini player's expand) open the song like the Now Playing tab.
+  const openFromFloatingPlayer = () => { if (!isNowPlayingOpen) onNavNowPlaying(); };
   const showLibrary = view === 'library' || (isNowPlayingOpen && previousView === 'library') || sheetLibrary;
   showLibraryRef.current = showLibrary;
 
@@ -1647,17 +1739,20 @@ export default function App() {
     playRecordedRef.current = false;
   }, [currentTrack?.filePath]);
 
-  // ── Search: the Library's own field (TrackListHeader.jsx) ──────────────────────────────────
-  // It lives in the Library's column header (its 🔍 opens it, and the Title label becomes the
-  // field); the list itself filters as you type (visibleTracks). Opened by the 🔍, by ⌘F from any
-  // page (which goes to the Library first) or by simply typing a letter on the Library. Esc clears
-  // the text, a second Esc closes it. It only exists on the Library (alone or beside the song), and
-  // leaving the Library clears it.
+  // ── Search: the list's own field (TrackListHeader.jsx) ─────────────────────────────────────
+  // It lives in the column header of the Library and of a details page (its 🔍 opens it, and the
+  // Title label becomes the field); that page's list filters as you type (visibleTracks for the
+  // Library, HomeDetailView's own for a details page). Opened by the 🔍, by ⌘F or by simply typing
+  // a letter: on the Library or a details page it searches that page; from anywhere else (Home, Now
+  // Playing) ⌘F goes to the Library first. Esc clears the text, a second Esc closes it. Leaving the
+  // page clears it.
   const searchInputRef = useRef(null);
   const pendingSearchRef = useRef(null); // text to open with once the Library is on screen (⌘F / typing from elsewhere)
   const focusSearchField = () => requestAnimationFrame(() => searchInputRef.current?.focus());
-  // The page's identity for search: anything but the Library closes and clears it.
-  const searchPageKey = pageView === 'library' ? 'library' : `other:${pageView}`;
+  // The pages that have it: the Library, and a details page. Leaving the page closes and clears it.
+  const onDetailPage = pageView === 'home' && !!homeDetailItem;
+  const searchHere = pageView === 'library' || onDetailPage;
+  const searchPageKey = pageView === 'library' ? 'library' : onDetailPage ? `detail:${homeDetailItem.type}:${homeDetailItem.key}` : `other:${pageView}`;
   React.useEffect(() => {
     const pending = pendingSearchRef.current;
     pendingSearchRef.current = null;
@@ -1673,8 +1768,8 @@ export default function App() {
 
   const openSearch = React.useCallback((initial = '') => {
     if (isMiniLayout) return;
-    if (pageView !== 'library') {
-      // ⌘F from Home, a detail page or Now Playing: to the Library, with the field open
+    if (!searchHere) {
+      // ⌘F from Home or Now Playing: to the Library, with the field open
       pendingSearchRef.current = initial;
       setView('library');
       return;
@@ -1682,7 +1777,7 @@ export default function App() {
     setSearchOpen(true);
     if (initial) setSearchQuery((q) => q + initial);
     focusSearchField();
-  }, [isMiniLayout, pageView]);
+  }, [isMiniLayout, searchHere]);
   const clearSearch = React.useCallback(() => { setSearchQuery(''); focusSearchField(); }, []);
   const closeSearch = React.useCallback(() => {
     setSearchOpen(false);
@@ -1703,7 +1798,7 @@ export default function App() {
   // (a letter-or-digit rule never includes it), and Backspace/Delete stay the list's own keys.
   const searchKeysRef = useRef(null);
   searchKeysRef.current = { searchOpen, searchQuery, openSearch, clearSearch, closeSearch,
-    blocked: isMiniLayout || chillActive || !!trackMenu || !!pendingNewTracks || pageView !== 'library' || library.length === 0 };
+    blocked: isMiniLayout || chillActive || !!trackMenu || !!pendingNewTracks || !searchHere || library.length === 0 };
   React.useEffect(() => {
     const onKey = (e) => {
       const k = searchKeysRef.current;
@@ -1753,7 +1848,7 @@ export default function App() {
     'play-pause': togglePlay,
     'next': () => playNext(false),
     'previous': playPrev,
-    'toggle-shuffle': () => setIsShuffle(s => !s),
+    'toggle-shuffle': () => toggleShuffle(),
     'cycle-repeat': toggleRepeat,
     'go-to-current': goToCurrentSong,
     // File > Filled Screen / Narrow / Mini Mode end Chill (the exit button's effect).
@@ -1836,7 +1931,7 @@ export default function App() {
     play: () => togglePlay(),
     next: () => playNext(false),
     prev: () => playPrev(),
-    shuffle: () => setIsShuffle((v) => !v),
+    shuffle: () => toggleShuffle(),
     repeat: () => toggleRepeat(),
     seek: (t) => {
       const a = audioRef.current;
@@ -1874,6 +1969,8 @@ export default function App() {
       seedMixResult: (seedTrack, tracks) => __setMixCacheForTest(seedTrack, tracks),
       // test hook: the session as it would be saved right now
       getSession: () => buildSessionRef.current?.(),
+      // test hook: the list that is playing (playQueue.js) and the "Play Next" songs
+      getQueue: () => ({ ...(playQueueRef.current || {}), playNext: [...forcedNextQueueRef.current] }),
       // test hook: open Now Playing from the current page, beside it (the split) or alone
       openNowPlaying: (beside = false) => { setIsLyricsOpen(false); setNpBeside(!!beside); expandNowPlayingRef.current?.(); },
     };
@@ -1888,10 +1985,9 @@ export default function App() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* The window's artwork tint (over the vibrancy, under everything): crossfading fixed-colour
-          layers, not a background transition on this container (that repainted the whole window
-          every frame for a second on every song change). First child, so everything paints over it. */}
-      <ColourLayers rgb={artworkRgb} className="app-tint" layerStyle={({ r, g, b }) => ({ position: 'absolute', inset: 0, background: `rgba(${r}, ${g}, ${b}, 0.5)` })} />
+      {/* (No window-wide artwork tint any more: since the liquid-colour backgrounds fill the glass
+          card edge to edge, all that showed of it was a song-coloured line around the window, along
+          the card's 1px border and rounded corners.) */}
       {/* Chill mode: a fixed full-window layer (like the mini player), so the
           photo fills the whole app, title strip included.
           ITS POSITION IN THE DOCUMENT MATTERS. Electron builds the window's
@@ -2111,7 +2207,7 @@ export default function App() {
                   density={density}
                   selection={librarySelection}
                   sort={librarySortApi.sort}
-                  playTrack={playTrackFresh}
+                  playTrack={libraryPlayTrack}
                   togglePlay={togglePlay}
                   onShowMenu={openTrackMenu}
                   onRemoveTracks={removeTracks}
@@ -2135,7 +2231,7 @@ export default function App() {
               library={library}
               currentTrack={currentTrack}
               isPlaying={isPlaying}
-              playTrack={playTrackFresh}
+              playTrack={homePlayTrack}
               playAllTracks={playAllTracks}
               onOpenDetail={openHomeDetail}
               isActive={view === 'home' && !homeDetailItem}
@@ -2158,6 +2254,10 @@ export default function App() {
               savedScrollTop={homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] ?? 0}
               onScrollChange={(pos) => { homeDetailScrollsRef.current[`${homeDetailItem.type}:${homeDetailItem.key}`] = pos; }}
               bottomClearance={isNarrowLayout ? NARROW_PILL_CLEARANCE : PLAYER_PILL_CLEARANCE}
+              search={{
+                open: searchOpen, query: searchQuery, words: searchWordList, inputRef: searchInputRef,
+                onOpen: () => openSearch(), onQueryChange: setSearchQuery, onClear: clearSearch, onClose: closeSearch,
+              }}
             />
           )}
 
@@ -2637,31 +2737,33 @@ export default function App() {
           <Home size={15} />
           {!isNarrowLayout && <span>Home</span>}
         </button>
-        <button
-          className={cx('clickable nav-pill-btn', { active: view === 'library', 'icon-only': isNarrowLayout })}
-          title="Library"
-          aria-label="Library"
-          onClick={onNavLibrary}
-        >
-          <ListMusic size={15} />
-          {!isNarrowLayout && <span>Library</span>}
-        </button>
-        {/* Now Playing: a tab like Home and Library (with a song; an icon at narrow widths). Lit
-            while the song is open (Chill included), where clicking it does nothing. A fixed width,
-            so its bubble slot springs to exactly its size. */}
+        {/* Now Playing: after Home, before Library (the split's order: the song left, the Library
+            right). A tab like the others (with a song; an icon at narrow widths), lit
+            while the song is open (Chill included); with the Library it is a toggle (onNavNowPlaying).
+            A fixed width, so its bubble slot springs to exactly its size. */}
         <Bubble show={navNowPlayingVisible} variant="slot" width={isNarrowLayout ? NAV_NP_TAB_WIDTH_NARROW : NAV_NP_TAB_WIDTH}>
           <button
-            className={cx('clickable nav-pill-btn nav-np-tab', { active: isNowPlayingOpen, 'icon-only': isNarrowLayout })}
+            className={cx('clickable nav-pill-btn nav-np-tab', { active: isNowPlayingOpen, 'nav-joined-start': navJoined, 'icon-only': isNarrowLayout })}
             title="Now Playing"
             aria-label="Now Playing"
             aria-current={isNowPlayingOpen ? 'page' : undefined}
             style={{ width: isNarrowLayout ? NAV_NP_TAB_WIDTH_NARROW : NAV_NP_TAB_WIDTH }}
-            onClick={() => { if (!isNowPlayingOpen) openFromFloatingPlayer(); }}
+            onClick={onNavNowPlaying}
           >
             <Disc3 size={15} />
             {!isNarrowLayout && <span>Now Playing</span>}
           </button>
         </Bubble>
+        <button
+          className={cx('clickable nav-pill-btn nav-library-tab', { active: navLibraryLit, 'nav-joined-end': navJoined, 'icon-only': isNarrowLayout })}
+          title="Library"
+          aria-label="Library"
+          aria-current={navLibraryLit ? 'page' : undefined}
+          onClick={onNavLibrary}
+        >
+          <ListMusic size={15} />
+          {!isNarrowLayout && <span>Library</span>}
+        </button>
         <span className="nav-pill-divider" aria-hidden="true" />
         <button
           className="clickable nav-tool-btn nav-add-btn"
@@ -2676,7 +2778,6 @@ export default function App() {
       <NowPlayingPill
         show={npPillVisible}
         lyrics={{ visible: sideLyricsVisible, on: isLyricsOpen && !npSplit, onClick: toggleSideLyrics }}
-        library={{ visible: sideLibraryVisible && !isNarrowLayout, on: npSplitLibrary, onClick: toggleSideLibrary }}
         onChill={enterChill}
         chillTitle={isNarrowLayout ? 'Chill mode (fills the screen)' : 'Chill mode'}
       />

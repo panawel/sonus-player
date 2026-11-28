@@ -6,9 +6,10 @@ import { useTrackSort } from './useTrackSort.js';
 import { useTrackSelection } from './useTrackSelection.js';
 import { useIsNarrow } from './useIsNarrow.js';
 import { useMix } from './useMix.js';
+import { trackMatchesWords } from './librarySearch.js';
 import {
   ULTRA_COMPACT_PANEL_BREAKPOINT, LIBRARY_YEAR_COL_BREAKPOINT, LIBRARY_GENRE_COL_BREAKPOINT,
-  NARROW_LAYOUT_BREAKPOINT, TITLE_STRIP_HEIGHT, extraColumnFitCount, detailExtraColumns, trackMatchesQuery,
+  NARROW_LAYOUT_BREAKPOINT, TITLE_STRIP_HEIGHT, extraColumnFitCount, detailExtraColumns,
 } from './trackUtils.js';
 
 const MISSING_TITLES = { art: 'Missing Art', year: 'Missing Year', lyrics: 'Missing Lyrics' };
@@ -72,7 +73,9 @@ function formatDuration(sec) {
   return `${m}m`;
 }
 
-export default function HomeDetailView({ item, library, currentTrack, isPlaying, playTrack, togglePlay, playAllTracks, onShowMenu, onRemoveTracks, savedScrollTop = 0, onScrollChange, density, onDensityChange, selectionRegistryRef, bottomClearance = 0, searchQuery = '', onTracksChange }) {
+const NO_WORDS = []; // (a stable empty list: no search)
+
+export default function HomeDetailView({ item, library, currentTrack, isPlaying, playTrack, togglePlay, playAllTracks, onShowMenu, onRemoveTracks, savedScrollTop = 0, onScrollChange, density, onDensityChange, selectionRegistryRef, bottomClearance = 0, search = null, onTracksChange }) {
   // Same extra-columns mechanism Library uses (App.jsx), just with a
   // per-page-type filter first — see detailExtraColumns in trackUtils.js for
   // which column gets suppressed on which page (e.g. no Album column on an
@@ -131,19 +134,19 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
 
   const innerScrollRef = useRef(null);
 
-  // Report this page's full track list upward (optional; nothing uses it since search moved into
-  // the Library's own column header — the floating search panel that scoped itself to this page
-  // is gone).
+  // Report this page's full track list upward (optional; nothing uses it at the moment).
   useEffect(() => { onTracksChange?.(tracks); }, [tracks, onTracksChange]);
 
-  // A search text (`searchQuery`, '' since search became the Library's own field, so this is
-  // dormant) live-filters THIS page's tracks. Only the list is filtered: everything describing the page
-  // itself — the track count and duration in the subtitle, the hero artwork,
-  // whether Play/Shuffle are enabled — keeps reading from the full `tracks`.
-  const searching = searchQuery.trim() !== '';
+  // The page's search (the same field as the Library's, in this page's column header; App.jsx owns
+  // its text): it filters THIS page's tracks, words in any order, matches highlighted. Only the list
+  // is filtered: everything describing the page itself — the track count and duration in the
+  // subtitle, the hero artwork, whether Play/Shuffle are enabled — keeps reading from the full
+  // `tracks`. The page's Play / Shuffle and a row picked play the list as filtered.
+  const words = search?.words || NO_WORDS;
+  const searching = words.length > 0;
   const listTracks = useMemo(
-    () => (searching ? tracks.filter(t => trackMatchesQuery(t, searchQuery)) : tracks),
-    [tracks, searching, searchQuery]
+    () => (searching ? tracks.filter(t => trackMatchesWords(t, words)) : tracks),
+    [tracks, searching, words]
   );
 
   // Per-open sort (resets whenever the detail item changes) + selection.
@@ -468,6 +471,7 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
           onDensityChange={onDensityChange}
           showAlbum={false}
           extraColumns={visibleExtraColumns}
+          search={search ? { ...search, count: listTracks.length, total: tracks.length } : undefined}
         />
       </div>
 
@@ -501,9 +505,11 @@ export default function HomeDetailView({ item, library, currentTrack, isPlaying,
           extraColumns={visibleExtraColumns}
           initialOffset={savedScrollTop}
           bottomPadding={bottomClearance}
+          highlight={searching ? words : null}
           emptyState={searching ? (
-            <div style={{ color: 'var(--text-secondary)', textAlign: 'center', marginTop: 60 }}>
-              <p style={{ fontSize: 15 }}>No tracks match "{searchQuery.trim()}".</p>
+            <div className="list-search-empty" data-list-search-empty>
+              No songs match “<b>{search.query.trim()}</b>”
+              <div><button className="clickable" onClick={search.onClear}>Clear search</button></div>
             </div>
           ) : undefined}
         />

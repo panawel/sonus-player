@@ -165,14 +165,19 @@ export default function LiquidCover({ src, isPlaying, active = true, calm = fals
       g.raf = 0;
       const { palette: pal, moving, active: on, calm: isCalm } = stateRef.current;
       let holdMotion = false;
-      if (isCalm && on && (moving || g.p < 1 || pal !== g.to)) {
-        // calm: at most CALM.fps frames a second, and the flowing motion holds still while a list
-        // scrolls (and a moment after). A new song's colours still crossfade in AT ONCE: a skip
-        // auto-scrolls the Library to the new song, and waiting for that scroll made the colour
-        // change visibly late. Those few frames are cheap; only the endless motion is held back.
-        const scrolling = now - scrolledAt < CALM.scrollRestMs;
+      if (isCalm && on) {
+        // calm: at most CALM.fps frames a second, and nothing is drawn while a list scrolls (and a
+        // moment after): neither the flowing motion nor a one-off frame woken while paused (a
+        // play/pause, say, mid-scroll; that used to draw at once, measured under Rosetta, where a
+        // stuttering song woke it mid-scroll). A new song's colours still crossfade in AT ONCE: a
+        // skip auto-scrolls the Library to the new song, and waiting for that scroll made the
+        // colour change visibly late. Those few frames are cheap; everything else waits.
+        // (by the clock, like scrolledAt: a frame's own timestamp can run ahead of it — measured
+        // 400-700ms ahead on a slow machine (Rosetta), which made a scroll 16ms ago look over)
+        const scrolling = performance.now() - scrolledAt < CALM.scrollRestMs;
         const colourChange = g.p < 1 || pal !== g.to;
-        if ((scrolling && !colourChange) || (g.last && now - g.last < 1000 / CALM.fps)) { g.raf = requestAnimationFrame(draw); return; }
+        const animating = moving || colourChange;
+        if ((scrolling && !colourChange) || (animating && g.last && now - g.last < 1000 / CALM.fps)) { g.raf = requestAnimationFrame(draw); return; }
         holdMotion = scrolling;
       }
       const dt = g.last ? Math.min(isCalm ? 0.2 : 0.05, (now - g.last) / 1000) : 0;

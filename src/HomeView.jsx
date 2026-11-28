@@ -337,7 +337,7 @@ function SectionHeader({ title, onScrollLeft, onScrollRight, children }) {
   );
 }
 
-const QuickPickRow = memo(function QuickPickRow({ track, currentTrack, isPlaying, playTrack }) {
+const QuickPickRow = memo(function QuickPickRow({ track, list, currentTrack, isPlaying, playTrack }) {
   const [hovered, setHovered] = useState(false);
   const isCurrent = currentTrack?.filePath === track.filePath;
   return (
@@ -354,7 +354,7 @@ const QuickPickRow = memo(function QuickPickRow({ track, currentTrack, isPlaying
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={() => playTrack(track, false)}
+      onClick={() => playTrack(track, false, list)} // (Quick Picks is the list that plays)
     >
       <div style={{ position: 'relative', width: 38, height: 38, borderRadius: 6, overflow: 'hidden', background: 'var(--glass-active)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {track.thumb
@@ -1297,6 +1297,7 @@ const HomeView = memo(function HomeView({ library, currentTrack, isPlaying, play
               <QuickPickRow
                 key={track.filePath}
                 track={track}
+                list={quickPicks}
                 currentTrack={currentTrack}
                 isPlaying={isPlaying}
                 playTrack={playTrack}

@@ -38,13 +38,21 @@ Plays **MP3, FLAC, WAV, OGG, M4A and AAC**.
 
 ---
 
-## What's new in 1.9
+## What's new in 1.10
 
-- **Your Library beside the song.** Now Playing can share the window with your Library, or with the lyrics. Pick either from the small pill at the top right.
+- **Shuffle that really shuffles.** Whatever list you play from (the Library, an artist, an album, a Mix) is what plays. Shuffle plays every song once in a fresh order, and a new order each time you turn it on. Repeat loops that list, and it stops at the end when Repeat is off.
+- **Now Playing and Library, side by side, from the top bar.** Switch both on to see the song with your Library beside it; switch one off to go back to the other. The two tabs light up as one when they're together.
+- **Search on every artist and album page.** Press `⌘F` or just start typing, the same as in the Library.
+- **Hold Play** to jump the Library beside the song to what's playing.
+- **Fixes:** a song you left paused no longer starts by itself on slower Macs, no more coloured line around the window or orange rings on buttons, and a calmer background while you scroll.
+
+### New in 1.9
+
+- **Your Library beside the song.** Now Playing can share the window with your Library or the lyrics.
 - **A Now Playing tab** in the top bar, which takes you straight back to your song exactly as you left it.
 - **Living colour.** The background flows with the colours of the cover, behind every page, and changes the instant you skip.
 - **Lyrics you can actually read.** Big, centred lines, and the ones you're reading light up as you scroll.
-- **Search, rebuilt.** Just start typing in the Library. Words in any order, accents ignored, matches highlighted.
+- **Search, rebuilt.** Just start typing. Words in any order, accents ignored, matches highlighted.
 - **Strip mode.** A slim player that docks beside the macOS Dock and stays out of your way.
 - **It comes back as you left it.** Reopen Sonus to the same song, paused where you stopped, with your queue, shuffle and repeat.
 - **Home** now filters everything by decade with a single row of tags.
@@ -56,7 +64,7 @@ Plays **MP3, FLAC, WAV, OGG, M4A and AAC**.
 
 ### Now Playing, the way it should be
 
-Big artwork, a background that takes the cover's colours, and lyrics that are a pleasure to read. Hebrew and Arabic lyrics show right-to-left, the way they should. Want your Library or the lyrics next to the song? One tap.
+Big artwork, a background that takes the cover's colours, and lyrics that are a pleasure to read. Hebrew and Arabic lyrics show right-to-left, the way they should. Want your Library next to the song? Switch on both Now Playing and Library in the top bar. The lyrics are one tap away too.
 
 <img src="docs/assets/now-playing-lyrics.jpg" alt="Now Playing with the lyrics beside the song" width="860">
 
@@ -184,7 +192,7 @@ xattr -dr com.apple.quarantine /Applications/Sonus.app
 Every release lists **SHA-256 checksums** so you can check your download is exactly what was built:
 
 ```bash
-shasum -a 256 ~/Downloads/Sonus-1.9.0-universal.dmg
+shasum -a 256 ~/Downloads/Sonus-1.10.0-universal.dmg
 ```
 
 > Prefer not to run unsigned apps? [Build it yourself](#building-from-source). It's four commands.

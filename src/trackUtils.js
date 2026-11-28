@@ -2,16 +2,7 @@
 // Single source of truth — replaces the formatTime copies that used to live in
 // SortableTrackRow.jsx / HomeDetailView.jsx / HomeView.jsx.
 
-// The one definition of "does this track match what the user typed" — Library
-// search, a Details page's search and Home's grouped Songs results all use it,
-// so the three can never disagree about what counts as a match. Same fields
-// the Tag Editor exposes: Title / Artist / Album / Year / Genre.
-export function trackMatchesQuery(track, query) {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return [track.title, track.artist, track.album, track.year, track.genre]
-    .some(field => field && String(field).toLowerCase().includes(q));
-}
+// What counts as a search match lives in librarySearch.js (the Library's and a details page's search).
 
 // Row geometry per density — shared by TrackRow, TrackList, and the header.
 export const ROW_HEIGHTS = { compact: 44, comfortable: 56 };

@@ -2,18 +2,19 @@ import { Mic2, ListMusic, TreePalm } from 'lucide-react';
 import Bubble from './Bubble.jsx';
 
 // Now Playing's own pill at the top right of the title strip (only while the song is open, never in
-// Chill): [ Lyrics | Library ] · Chill.
+// Chill): Lyrics · Chill.
 //
-// Lyrics and the Library are one either-or switch: one lit glass thumb sits behind the button that
-// is on and springs across when the other is chosen; tapping the lit one turns it off (the thumb
-// shrinks away and the song is alone). Chill is a plain button, never lit. Each button comes and
-// goes in its own spring slot: Lyrics only while the song has lyrics, the Library only where the
-// window can split (never at phone width), and the divider only while either is there.
+// Lyrics has a lit glass thumb behind it while the lyrics are beside the song; tapping it again
+// turns them off (the thumb shrinks away). Chill is a plain button, never lit. Lyrics comes and goes
+// in its own spring slot (only while the song has lyrics), the divider with it. The toggle can hold
+// a second either-or button (`library`, unused: the Library beside the song is the top bar's
+// Library tab since the two tabs became toggles), the thumb springing between the two.
 const TOOL = 28; // .nav-tool-btn
+const HIDDEN = { visible: false };
 const GAP = 2;   // .np-pill-toggle's gap
 const DIVIDER = 7; // .nav-pill-divider: 1px + 3px margins
 
-export default function NowPlayingPill({ show, lyrics, library, onChill, chillTitle = 'Chill mode' }) {
+export default function NowPlayingPill({ show, lyrics, library = HIDDEN, onChill, chillTitle = 'Chill mode' }) {
   const on = lyrics.visible && lyrics.on ? 'lyrics' : library.visible && library.on ? 'library' : null;
   const x = on === 'library' && lyrics.visible ? TOOL + GAP : 0;
   const toggle = (key, o, Icon, label, extraClass) => (
