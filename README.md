@@ -20,6 +20,8 @@
 
 One download for every Mac, Intel or Apple Silicon · macOS 12 or newer
 
+<sub>**1.10 is the last version for Intel Macs.** Later versions will be for Apple Silicon only.</sub>
+
 </div>
 
 ---
@@ -220,7 +222,7 @@ That's the whole list.
 | | |
 | --- | --- |
 | **macOS** | 12 Monterey or newer |
-| **Mac** | Any Intel or Apple Silicon Mac (one universal app) |
+| **Mac** | Any Intel or Apple Silicon Mac (one universal app). 1.10 is the last version for Intel Macs |
 | **Disk** | ~500MB |
 
 ## Building from source
